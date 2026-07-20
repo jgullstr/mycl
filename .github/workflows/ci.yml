@@ -6,14 +6,14 @@ on:
   pull_request:
 
 jobs:
-  ci:
+  # @mycl/core's declared engines floor: alsContext resolves node:async_hooks
+  # via process.getBuiltinModule, backported to Node 20.16. The floor is a
+  # claim about the PACKAGE, so this leg exercises core alone; the docs app
+  # (Astro) needs Node 22.12+ and builds in the full job below. The packed
+  # smoke test runs here too: it round-trips alsContext on the floor runtime.
+  core-floor:
+    name: core on Node 20.16 (engines floor)
     runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        # 20.16 is the declared engines floor: alsContext resolves node:async_hooks
-        # via process.getBuiltinModule, backported to Node 20.16. 22 is the current
-        # default. Both must stay green.
-        node: ['20.16', 22]
     steps:
       - uses: actions/checkout@v4
 
@@ -22,7 +22,26 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: ${{ matrix.node }}
+          node-version: '20.16'
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @mycl/core build
+      - run: pnpm --filter @mycl/core test
+      - run: pnpm --filter @mycl/core typecheck
+      - run: pnpm smoke
+
+  full:
+    name: full workspace on Node 22
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
           cache: pnpm
 
       - run: pnpm install --frozen-lockfile

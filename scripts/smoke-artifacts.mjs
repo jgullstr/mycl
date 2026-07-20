@@ -148,9 +148,22 @@ try {
   writeFileSync(path.join(scratch, 'consumer.cjs'), cjsConsumer);
 
   process.stdout.write(run(process.execPath, ['consumer.mjs'], { cwd: scratch }));
-  process.stdout.write(run(process.execPath, ['consumer.cjs'], { cwd: scratch }));
 
-  console.log('OK: packed artifact loads and round-trips through import() and require()');
+  // require(esm) shipped unflagged in Node 22.12 and was backported to 20.19
+  // (process.features.require_module where available). Below those, a CJS
+  // consumer cannot synchronously require an ESM-only package by Node's own
+  // design, so the CJS round-trip proves nothing there: skip it rather than
+  // fail on a capability the runtime does not have.
+  const [maj, min] = process.versions.node.split('.').map(Number);
+  const canRequireEsm = process.features.require_module
+    ?? (maj >= 23 || (maj === 22 && min >= 12) || (maj === 20 && min >= 19));
+  if (canRequireEsm) {
+    process.stdout.write(run(process.execPath, ['consumer.cjs'], { cwd: scratch }));
+    console.log('OK: packed artifact loads and round-trips through import() and require()');
+  } else {
+    console.log(`skip: require(esm) unavailable on Node ${process.versions.node}; CJS consumer not run`);
+    console.log('OK: packed artifact loads and round-trips through import()');
+  }
 } finally {
   rmSync(scratch, { recursive: true, force: true });
 }
