@@ -1,0 +1,99 @@
+---
+title: Channels
+description: "A channel is a private capability namespace with its own scope context: mint one kernel per app or library, and nothing outside it can see in."
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import channelsMint from '../../../examples/channels-mint.ts?raw';
+import channelsDisjoint from '../../../examples/channels-disjoint.ts?raw';
+
+Everything in mycl happens on a **channel**: a private namespace you mint once
+with `createFnChannel(name)`. The call returns your **kernel**, bound to that
+channel: `capable`, `snapshot`, `mycl`, `scope`, and the `channel` token. The
+rest of this guide is about what those members do; this page is about the
+namespace they share.
+
+<Playground client:only="react" code={channelsMint} />
+
+## Mint once per project
+
+A channel is meant to be minted exactly once, in a module of its own, with the
+kernel exported for the rest of the codebase:
+
+```ts
+// src/kernel.ts: the app's capability kernel
+import { createFnChannel } from '@mycl/core';
+
+export const { capable, snapshot, channel, mycl, scope } = createFnChannel('my-app-or-library');
+```
+
+Everything else imports from `./kernel`. A library does exactly the same
+behind its own entry point; see
+[Installation](/getting-started/installation/#library-exports).
+
+## A name never connects channels
+
+Calling `createFnChannel('my-app-or-library')` twice gives two unrelated channels that
+merely share a label: there is no channel registry and no name-based
+rendezvous, so nothing can reach or join your channel by knowing its name.
+Sharing a channel happens the ordinary JavaScript way, by importing the kernel
+from the module that minted it, which is why the mint-once pattern above is
+the whole coordination story.
+
+What the name does do: it becomes the `name:` prefix of every identifier
+minted through the kernel's `capable` (`my-app-or-library:greet`), the label you see in
+error messages and introspection. Reusing a name elsewhere cannot break
+isolation, but it muddies those labels, and two same-named channels minting
+the same identifier path trip the dev duplicate-identifier warning
+([error 13](/errors/13/)): the labels collide even though the channels never
+do.
+
+The name must not contain `:` or `/` (either is a type error, and in dev
+throws [error 12](/errors/12/)): `:` because the first `:` of an assembled
+identifier must split it unambiguously back into channel and path, and `/`
+because it is reserved as the segment separator inside identifier paths. Dots
+are fine (`my.kernel` is a valid name).
+
+## Channels are disjoint
+
+A channel owns its own scope [context](/reference/glossary/#context). A scope
+made by one kernel installs bindings into that channel only, and capabilities
+minted on another channel keep reading their own. That is the isolation the
+embedded model rests on: nothing you mint can collide with another library's
+capabilities, and theirs cannot see yours, even at the same identifier path.
+
+<Playground client:only="react" code={channelsDisjoint} />
+
+The first factory is the proof: `overrides` carries a `widgetGreet` binding,
+and that registry is active while the factory body runs, yet the widgets
+channel never sees it, because `app.mycl` installed it into the `app` channel
+only. If channels shared a context, `widgetGreet()` would have printed the
+widget override; instead it fails loud, the way a missing scope always does.
+The second factory shows the registry was never the obstacle, and the general
+rule for crossing channels: factories compose. The widgets channel gets its
+own `mycl` factory, the app factory calls it, and each one installs the same
+registry into its own channel.
+
+## The channel token
+
+`channel` is an opaque token proving which channel you hold. Its everyday job
+is context swapping: pass it to `setChannelContext` to replace how the channel
+carries its scope, for example installing `alsContext()` on Node so scopes
+survive `await` (see [Snapshots & Async](/guide/snapshots-and-async/)). Export
+the token from your kernel module only if you want that power available
+outside it.
+
+:::caution[One context, one channel]
+A context instance must back exactly one channel. Sharing one across channels
+merges their scope universes: bindings bleed between them, and the loud
+out-of-scope error stops firing, silently voiding the isolation shown above.
+Always mint a fresh context per channel (`alsContext()`, not a saved
+instance); installing a context that already backs another channel throws
+[error 16](/errors/16/) in dev.
+:::
+
+## Where next
+
+- [Capabilities](/guide/capabilities/): minting extension points through your kernel's `capable`.
+- [Scopes](/guide/scopes/): how a channel's active registry is chosen at call time.
+- [Building a Kernel](/advanced/building-a-kernel/): the connector level beneath `createFnChannel`, for kernels with a different shape.

@@ -1,0 +1,17 @@
+{
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["ESNext", "DOM"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "strict": true,
+    "noEmit": true,
+    "types": [],
+    "baseUrl": ".",
+    "paths": {
+      "@mycl/core": ["../../packages/core/dist/index.d.ts"],
+      "@mycl/core/helpers": ["../../packages/core/dist/helpers.d.ts"]
+    }
+  },
+  "include": ["src/examples/**/*.ts"]
+}

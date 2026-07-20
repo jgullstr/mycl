@@ -1,0 +1,86 @@
+---
+title: Snapshots & Async
+description: A scope lives on the synchronous stack, so async callbacks escape it, and snapshot(fn) pins the active scope into a function you can call later while, on Node, alsContext does it automatically.
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import snapshotsBoundary from '../../../examples/snapshots-boundary.ts?raw';
+
+A [scope](/guide/scopes/) lives on the synchronous call stack. It is active
+while the scoped function runs and gone the instant control returns. So the code
+*after* an `await`, inside a `.then()`, or in any callback that outlives the
+scope body runs with **no scope on the stack**, and a capability called there
+throws the loud "called outside any registry scope" error.
+
+`snapshot(fn)` is the fix. Called while a scope is active, it captures that
+scope and returns a function that replays it on every later call, no matter when
+or where the call happens.
+
+<Playground client:only="react" code={snapshotsBoundary} />
+
+Wrap it where the boundary is: the callback you hand to `setTimeout`, the
+function inside a `.then()`, the event handler you register, the method your
+`mycl()` builder returns for later use. Capture at the boundary; call whenever.
+
+## `snapshot` captures whatever is active, including no scope
+
+`snapshot` pins the scope active *at call time*, and "no scope" is a valid thing
+to pin. Call `snapshot` with no scope on the stack and the returned function
+replays scopelessness: a capability inside it throws, rather than silently
+adopting whatever scope happens to be active when the function later runs. That
+is deliberate: a missed boundary fails loud at the call site instead of
+dispatching through a stranger's scope. To pin the defaults on purpose, take the
+snapshot inside a `scope(fn)` body with no registry.
+
+This is the counterpart to the [escaping-function rule](/guide/scopes/#functions-that-outlive-the-scope):
+`scope()` establishes a scope up front, `snapshot()` carries an already-active
+one across a boundary.
+
+## Node.js: `alsContext` for automatic propagation
+
+On Node you can retire the manual snapshots entirely. Swap your channel's
+context for `alsContext()`, an `AsyncLocalStorage`-backed
+[`ScopeContext`](/reference/core/#scopecontextr) shipped from
+`@mycl/core/context`, and the scope propagates across `await`, `setTimeout`,
+and microtask boundaries on its own.
+
+This snippet needs Node built-ins the Playground can't run, so it is shown as
+static configuration. Wire it once at startup, wherever you minted the channel:
+
+```ts
+import { setChannelContext } from '@mycl/core';
+import { alsContext } from '@mycl/core/context';
+import { channel } from './kernel'; // your createFnChannel('my-app-or-library') module
+
+setChannelContext(channel, alsContext());
+```
+
+After this, every `scope()` and `mycl()` call for that channel uses
+`AsyncLocalStorage` as its backing store, and capabilities called after an
+`await` dispatch through the right scope automatically. `snapshot` still works.
+It just becomes optional.
+
+`alsContext` resolves `node:async_hooks` lazily, through `process.getBuiltinModule`,
+the first time it is *called*, not through a static import: the entry stays
+browser-safe to import even for consumers that never call it. That lazy lookup
+needs Node 20.16 or newer (or another runtime that provides
+`process.getBuiltinModule`); calling `alsContext()` where it is missing throws
+[error 14](/errors/14/). A `ScopeContext` is just `{ get, run }`, so if you need
+something other than the stack or `AsyncLocalStorage`, for example a test
+harness or a different async-tracking primitive, writing your own stays a
+few lines: see [Building a Kernel](/advanced/building-a-kernel/) for the
+`{ get, run }` contract and a hand-rolled example.
+
+## Browser caveat
+
+Browsers have no `AsyncLocalStorage` (and the `zone.js`-style shims that emulate
+it are not part of mycl). In the browser, `snapshot` is the mechanism: capture at
+every async boundary. The `mycl()` habit of wrapping each builder method in
+`snapshot` covers the common cases: the method carries its scope wherever it is
+later called.
+
+## Where next
+
+- [Scopes](/guide/scopes/): the synchronous scope model these snapshots carry.
+- [Factories](/guide/factories/): why `mycl()` builder methods are wrapped in `snapshot`.
+- [Augmentation](/guide/augmentation/): the async caveat behind `after` and `pipe`.

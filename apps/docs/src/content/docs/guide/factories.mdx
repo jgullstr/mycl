@@ -1,0 +1,111 @@
+---
+title: Factories
+description: "mycl(make, ...registries) returns a frozen factory: registries resolve once at creation, the builder runs per call and its result comes back verbatim."
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import factoriesBuilder from '../../../examples/factories-builder.ts?raw';
+import factoriesExtend from '../../../examples/factories-extend.ts?raw';
+import factoriesPlatforms from '../../../examples/factories-platforms.ts?raw';
+
+`mycl(make, ...registries)` bundles registries into a **factory**, a frozen
+callable. The registries resolve once, when `mycl()` is called. Each time you
+call the factory, your **builder** (`make`) runs inside that one resolved scope
+and whatever it returns (the **instance**) comes back verbatim. Reach for
+`mycl()` when you want to fix a scope up front and then hand out ready-to-use
+instances that dispatch through it.
+
+<Playground client:only="react" code={factoriesBuilder} />
+
+Two build lines print: the builder ran once per call. Both instances read
+`'09:00'` from the same resolved `clock`, and each carries its own `user`. The
+returned object is exactly what the builder produced.
+
+## The instance comes back verbatim
+
+`mycl()` does not inspect, wrap, freeze, or scope-bind the builder's return. It
+runs `make`, and returns the result unchanged. That keeps the factory
+predictable: the shape you build is the shape callers get.
+
+The catch lives in the scope. The resolved scope is active only *while* `make`
+runs. A method on the instance that is called *later*, after the builder has
+returned, is outside that scope and would throw. Wrap any such method in
+`snapshot()` (as `stamp` above does) so it replays the build-time scope when it
+runs. See [Snapshots and async](/guide/snapshots-and-async/) for the full model.
+
+The factory itself is frozen and not extensible: you cannot bolt bindings onto
+it after creation. To add behavior, pass the factory back into `mycl()`.
+
+## Extending a factory
+
+Pass an existing factory as the first argument to fold more registries onto it.
+The factory's own registries fold first; the ones you add fold on top and win on
+conflict. The original factory is untouched.
+
+<Playground client:only="react" code={factoriesExtend} />
+
+`makeLoggingApp` reuses everything `makeApp` was built over and adds the augment
+on top. This is how features, plugins, or test overrides compose onto a base
+factory without editing its definition. See [Augmentation](/guide/augmentation/)
+for what `.augment()` does.
+
+## Declaring requirements with `requires`
+
+Some capabilities have no usable default: their base throws or stubs (a `db`
+handle, the current user) and they only work once a registry binds them.
+`requires(...caps)(make)` declares those up front. It tags `make`'s **type**
+with the identifiers of the capabilities it needs, and returns `make` unchanged.
+
+`requires` is **compile-time only**: zero runtime effect, no wrapper, no
+allocation. The enforcement point is `mycl()`: passing registries that don't
+provide every required capability is a type error that names the missing one.
+Because this check cannot run (it fails at compile time, not at runtime), the
+example below is a static block rather than a live Playground.
+
+```ts
+import { createFnChannel, registry, requires } from '@mycl/core';
+
+const { capable, mycl } = createFnChannel('my-app-or-library');
+
+type Db = { query(id: string): string };
+
+// A required-effect seam: no usable base, so a registry MUST bind it.
+const db = capable((): Db => { throw new Error('no db bound'); }, 'db');
+
+// requires(db)(make) tags make's TYPE with db's identifier and returns make
+// unchanged (zero runtime effect). The check fires later, at mycl().
+const makeApp = requires(db)((id: string) => db().query(id));
+
+// ✓ the registry provides db → compiles.
+mycl(makeApp, registry().layer(db, () => ({ query: (id) => `row ${id}` })));
+
+// ✗ the registry does not provide db → mycl() is where it fails:
+mycl(makeApp, registry());
+//            ~~~~~~~~~~~~ Argument of type 'Registry<readonly []>' is not assignable to
+//   parameter of type '"mycl: registry is missing required capability: my-app-or-library:db"'.
+//   (That literal is produced by mycl's internal MissingCapabilities<M> guard type.)
+```
+
+`requires` is opt-in: a `make` passed to `mycl()` *without* `requires` has an
+empty required set and is never checked, so the bare
+`mycl(make, ...registries)` form keeps working. Reserve it for required-effect
+seams (capabilities whose base throws), not for enrichment capabilities that
+already run fine unbound.
+
+## One builder, many platforms
+
+Because the platform decision lives in a registry, the same builder can run
+anywhere. Keep the builder platform-agnostic (no `if (typeof window)` guards)
+and let the entry point pick the registry that binds the platform capability.
+
+<Playground client:only="react" code={factoriesPlatforms} />
+
+`makeStore` never learns which platform it runs on. Swapping `serverBacking` for
+`localStorage` or an in-memory map is a registry change at the entry point.
+Everything the builder calls stays the same.
+
+## Where next
+
+- [Augmentation](/guide/augmentation/): wrap what a capability resolves to, on top of a factory's registries.
+- [Snapshots and async](/guide/snapshots-and-async/): why builder methods called later must be wrapped in `snapshot()`.
+- [Type guarantees](/advanced/type-guarantees/): how `requires` and the type-level layers enforce completeness at compile time.

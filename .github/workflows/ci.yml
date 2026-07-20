@@ -1,0 +1,38 @@
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+jobs:
+  ci:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 20.16 is the declared engines floor: alsContext resolves node:async_hooks
+        # via process.getBuiltinModule, backported to Node 20.16. 22 is the current
+        # default. Both must stay green.
+        node: ['20.16', 22]
+    steps:
+      - uses: actions/checkout@v4
+
+      # Reads the pnpm version from the root package.json packageManager field.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+          cache: pnpm
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm size
+      - run: pnpm check-dce
+      - run: pnpm check-changelog
+      # Exercises the packed tarballs (npm pack + install), not the source the
+      # test suite aliases to — guards the exports map and ESM-only artifacts.
+      - run: pnpm smoke

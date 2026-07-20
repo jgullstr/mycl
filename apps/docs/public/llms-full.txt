@@ -1,0 +1,2841 @@
+# Introduction
+
+> What mycl is, what it is not, and who reaches for it.
+
+import introTax from '../../../examples/intro-tax.ts?raw';
+
+mycl lets you modify a TypeScript function's behavior without touching its declaration or
+its call sites. A **capability** is a wrapped function whose behavior a caller can re-bind per
+**scope**: swapping, wrapping or layering functionality transparently to the call site. Once
+declared, a capability becomes its own registry key, type contract and default implementation.
+
+When you call a capability, it dispatches through its active scope and resolves its own binding
+there. The scope's **registries** compose when you activate them through a `mycl()`
+factory call, bound to a private **channel** that encapsulates your capabilities.
+
+<Playground client:only="react" code={introTax} />
+
+## What mycl is not
+
+**Not a DI container.** DI containers wire a graph of objects at startup and hand you instances
+by type or token. mycl binds behavior to a scope on the call stack; there is no container, no
+lifetime, and no construction graph. You re-bind functions, not assemble services.
+
+**Not an effect system.** It does not track effects in the type system, thread a runtime, or ask
+you to restructure programs around a monad. A capability is a plain function; calling it looks
+like calling any function.
+
+**Not monkey-patching.** Monkey-patching mutates a shared module export for the whole process.
+A registry binding is immutable, and it only applies inside the scope you activate. The same
+capability keeps its default in every other scope.
+
+## Who it's for
+
+**Library authors** who want extension points without designing a plugin API. Wrap the functions
+you want consumers to be able to change in `capable()`, and the capability surface *is* the
+extension surface: consumers write bindings instead of asking you for new config knobs.
+
+**Application developers** who need behavior that varies by context: tests that swap I/O without
+mocks, per-request flags on a server, or platform-specific implementations bound once at the
+entry point instead of branching throughout the code.
+
+## Where next
+
+- [Installation](/getting-started/installation/): add mycl and set up the `./capabilities` convention.
+- [Quick Start](/getting-started/quick-start/): 60 seconds to your first override.
+- [Capabilities](/guide/capabilities/): the full story on defining and calling them.
+- [Prior Art](/advanced/concepts/): the deeper design rationale behind the mechanism.
+
+---
+
+# Installation
+
+> Install mycl in an app or a library, mint your channel, and set up the ./capabilities convention.
+
+## Initial configuration
+
+Install the package:
+
+```bash
+pnpm add @mycl/core
+```
+
+Then mint your channel once, in one module, and export the bound surface:
+
+```ts
+// src/kernel.ts: the capability kernel
+import { createFnChannel } from '@mycl/core';
+
+export const { capable, snapshot, channel, mycl, scope } = createFnChannel('my-app-or-library');
+```
+
+Everything else in your codebase imports from `./kernel`. The channel is yours alone:
+mycl ships no ambient default, so nothing you mint can collide with another
+library's capabilities, and theirs cannot see yours.
+
+Building an application? You're done: head to the
+[Quick Start](/getting-started/quick-start/). The rest of this page is for
+library authors.
+
+## Library exports
+
+The same wiring, embedded: take `@mycl/core` as a dependency. Regular keeps it
+fully invisible: it rides along inside your install, and consumers never see
+it. Peer shares one copy across the libraries in an app, at a cost: `@mycl/core`
+surfaces in the consumer's own install, a version constraint they now satisfy
+and manage for a package they never import. Channels stay disjoint either way,
+so the trade is packaging, not privacy. In both cases consumers never need to
+import from `@mycl/core` directly: your public entry point should re-export
+whatever they need under your own name.
+
+```ts
+// my-library/src/index.ts: the library export
+export { registry } from '@mycl/core'; // plugin-author surface, re-exported as yours
+```
+
+Your channel is private by construction, so other mycl copies in a consumer's
+realm are harmless: their channels are disjoint from yours, and duplicate
+copies of your own library each work independently too. The one hazard is a
+consumer whose tree resolves *your library* twice and mixes tokens across the
+copies. No channel name can bridge them: the name is a label, never a key, so
+two copies minting `'my-library'` still hold two disjoint channels (the same
+fact that keeps strangers from reaching your channel by guessing its name).
+That is a packaging problem; for a loud startup signal, see the self-report
+recipe in
+[Duplicate detection](/advanced/duplicate-detection/#recipe-self-report-your-own-copy).
+
+To accept extensions from the outside, take registries through your entry
+point (an option, a method, whatever fits your API) and pass them to your
+`mycl`/`scope`, which compose them for you. What that seam looks like is your
+design; mycl only supplies the mechanism. The mechanical half is small:
+
+```ts
+// my-library/src/index.ts: one possible seam
+import type { Registry } from '@mycl/core';
+import { mycl } from './kernel';
+import { buildApi } from './api';
+
+export const createMyLibrary = (...extensions: Registry[]) =>
+  mycl(buildApi, ...extensions)();
+```
+
+For the end-to-end version, capabilities export and all, see the
+[Extend a function from outside](/recipes/hero/) recipe.
+
+### The `./capabilities` convention
+
+A package that exposes capabilities should export them from a `./capabilities` subpath. Add the
+export, with explicit `types` conditions so the typed contract resolves under every consumer's
+module-resolution mode; on this subpath the contract is the product:
+
+```json
+{
+  "name": "my-library",
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "default": "./dist/index.js" },
+    "./capabilities": { "types": "./dist/capabilities.d.ts", "default": "./dist/capabilities.js" }
+  }
+}
+```
+
+The file re-exports the `capable()`-wrapped functions, which are used as registry keys when binding external functionality. Only the exported functions can be rebound: unexported capabilities stay internal to the library.
+
+```ts
+// src/capabilities.ts
+export { fetchUser, sendEmail, renderTemplate } from './impl';
+```
+
+Consumers import from `my-library/capabilities` to get the capability objects, then write bindings
+against them. Keeping capabilities on one predictable subpath makes the extension surface easy to
+find and lets separate contributors bind the same capabilities without coordinating.
+
+## Where next
+
+- [Quick Start](/getting-started/quick-start/): 60 seconds to your first override.
+- [Duplicate detection](/advanced/duplicate-detection/): the two guards, and when to self-report.
+
+---
+
+# Quick Start
+
+> Mint a channel, define a capability, override it per scope, and hand out instances from a factory, all in about a minute.
+
+import quickStartDefine from '../../../examples/quick-start-define.ts?raw';
+import quickStartOverride from '../../../examples/quick-start-override.ts?raw';
+import quickStartFactory from '../../../examples/quick-start-factory.ts?raw';
+
+Three steps to your first override. Each block below runs. Edit the code and it re-runs live.
+
+Everything in mycl happens on a [**channel**](/guide/channels/): a private namespace you mint once
+with `createFnChannel(name)`. It returns your kernel: `capable`, `snapshot`,
+`mycl`, `scope`, and the `channel` token, all bound to your channel. Your channel is yours alone;
+other mycl users in the same app dispatch through their own, without
+coordination.
+
+## 1. Define a capability
+
+`capable(fn, idPath)` wraps a function and gives it a stable **identifier**: your channel's name
+prefixed onto the **identifier path** you pass. The identifier is a label, for types, errors, and
+introspection; dispatch keys on the capability object itself, so two `capable()` calls mint two
+distinct capabilities even with the same path (the duplicate label just trips a dev warning).
+A capability always resolves through an active **scope** when you call it. App logic runs through
+a **factory** built with `mycl()`; with no registries its scope is empty, so the default
+implementation fires.
+
+<Playground client:only="react" code={quickStartDefine} />
+
+:::caution[Scope must be active]
+A capability called outside any active scope throws rather than silently misdispatching, and a
+scope does not survive an `await`. Step 3's `snapshot()` and
+[Snapshots & Async](/guide/snapshots-and-async/) cover the async story.
+:::
+
+## 2. Override it in a scope
+
+Collect bindings in a **registry**. `.layer(cap, replacement)` binds a new behavior for step 1's
+`price` capability (each block on this page is self-contained, so it re-declares what it uses).
+The call site is identical. The active scope decides which behavior runs: hand the registry to
+`mycl()` and everything inside the factory dispatches through it.
+
+<Playground client:only="react" code={quickStartOverride} />
+
+## 3. Keep the factory, hand out instances
+
+`mycl(make, ...registries)`, the function the library is named after, resolves the registries once and returns the factory as a frozen callable you can keep and reuse. Each call runs your `make` **builder** inside that resolved scope and its return value comes back verbatim. Anything `make` returns that is called *later* (after `make` finishes) must be wrapped in `snapshot()` so it replays the scope that was active while `make` ran.
+
+<Playground client:only="react" code={quickStartFactory} />
+
+## Where next
+
+- [Capabilities](/guide/capabilities/): defaults, identifiers, and calling capabilities.
+- [Registries and layers](/guide/registries-and-layers/): binding, augmenting, and composing.
+- [Factories](/guide/factories/): building instances with `mycl()`, and why `snapshot()` is needed.
+
+---
+
+# Channels
+
+> A channel is a private capability namespace with its own scope context: mint one kernel per app or library, and nothing outside it can see in.
+
+import channelsMint from '../../../examples/channels-mint.ts?raw';
+import channelsDisjoint from '../../../examples/channels-disjoint.ts?raw';
+
+Everything in mycl happens on a **channel**: a private namespace you mint once
+with `createFnChannel(name)`. The call returns your **kernel**, bound to that
+channel: `capable`, `snapshot`, `mycl`, `scope`, and the `channel` token. The
+rest of this guide is about what those members do; this page is about the
+namespace they share.
+
+<Playground client:only="react" code={channelsMint} />
+
+## Mint once per project
+
+A channel is meant to be minted exactly once, in a module of its own, with the
+kernel exported for the rest of the codebase:
+
+```ts
+// src/kernel.ts: the app's capability kernel
+import { createFnChannel } from '@mycl/core';
+
+export const { capable, snapshot, channel, mycl, scope } = createFnChannel('my-app-or-library');
+```
+
+Everything else imports from `./kernel`. A library does exactly the same
+behind its own entry point; see
+[Installation](/getting-started/installation/#library-exports).
+
+## A name never connects channels
+
+Calling `createFnChannel('my-app-or-library')` twice gives two unrelated channels that
+merely share a label: there is no channel registry and no name-based
+rendezvous, so nothing can reach or join your channel by knowing its name.
+Sharing a channel happens the ordinary JavaScript way, by importing the kernel
+from the module that minted it, which is why the mint-once pattern above is
+the whole coordination story.
+
+What the name does do: it becomes the `name:` prefix of every identifier
+minted through the kernel's `capable` (`my-app-or-library:greet`), the label you see in
+error messages and introspection. Reusing a name elsewhere cannot break
+isolation, but it muddies those labels, and two same-named channels minting
+the same identifier path trip the dev duplicate-identifier warning
+([error 13](/errors/13/)): the labels collide even though the channels never
+do.
+
+The name must not contain `:` or `/` (either is a type error, and in dev
+throws [error 12](/errors/12/)): `:` because the first `:` of an assembled
+identifier must split it unambiguously back into channel and path, and `/`
+because it is reserved as the segment separator inside identifier paths. Dots
+are fine (`my.kernel` is a valid name).
+
+## Channels are disjoint
+
+A channel owns its own scope [context](/reference/glossary/#context). A scope
+made by one kernel installs bindings into that channel only, and capabilities
+minted on another channel keep reading their own. That is the isolation the
+embedded model rests on: nothing you mint can collide with another library's
+capabilities, and theirs cannot see yours, even at the same identifier path.
+
+<Playground client:only="react" code={channelsDisjoint} />
+
+The first factory is the proof: `overrides` carries a `widgetGreet` binding,
+and that registry is active while the factory body runs, yet the widgets
+channel never sees it, because `app.mycl` installed it into the `app` channel
+only. If channels shared a context, `widgetGreet()` would have printed the
+widget override; instead it fails loud, the way a missing scope always does.
+The second factory shows the registry was never the obstacle, and the general
+rule for crossing channels: factories compose. The widgets channel gets its
+own `mycl` factory, the app factory calls it, and each one installs the same
+registry into its own channel.
+
+## The channel token
+
+`channel` is an opaque token proving which channel you hold. Its everyday job
+is context swapping: pass it to `setChannelContext` to replace how the channel
+carries its scope, for example installing `alsContext()` on Node so scopes
+survive `await` (see [Snapshots & Async](/guide/snapshots-and-async/)). Export
+the token from your kernel module only if you want that power available
+outside it.
+
+:::caution[One context, one channel]
+A context instance must back exactly one channel. Sharing one across channels
+merges their scope universes: bindings bleed between them, and the loud
+out-of-scope error stops firing, silently voiding the isolation shown above.
+Always mint a fresh context per channel (`alsContext()`, not a saved
+instance); installing a context that already backs another channel throws
+[error 16](/errors/16/) in dev.
+:::
+
+## Where next
+
+- [Capabilities](/guide/capabilities/): minting extension points through your kernel's `capable`.
+- [Scopes](/guide/scopes/): how a channel's active registry is chosen at call time.
+- [Building a Kernel](/advanced/building-a-kernel/): the connector level beneath `createFnChannel`, for kernels with a different shape.
+
+---
+
+# Capabilities
+
+> A capability is one function that is three things at once, a callable default, a typed contract, and a registry key.
+
+import capabilitiesDefine from '../../../examples/capabilities-define.ts?raw';
+import capabilitiesCompose from '../../../examples/capabilities-compose.ts?raw';
+
+A **capability** is an ordinary function you wrap with `capable()`. That one
+function is three things at once: a callable default you can run today, a typed
+contract others bind against, and its own registry key. Reach for a capability
+wherever you want a function's behavior to be swappable per scope without editing
+its source or its call sites.
+
+<Playground client:only="react" code={capabilitiesDefine} />
+
+## Three things at once
+
+The wrapped `greet` above is, simultaneously:
+
+- **A callable default.** Call it inside a scope and, with nothing bound, the
+  function you passed to `capable()` runs. Its call sites never change.
+- **A typed contract.** TypeScript infers the type of every binding and augment
+  from the capability's own signature: a replacement with the wrong shape is a
+  compile error, not a runtime surprise.
+- **Its own registry key.** The capability object itself is the key:
+  `registry().layer(greet, replacement)` keys on `greet`. There is no separate
+  token and no string lookup.
+
+## Identifier: the path you pass, the id you get
+
+The second argument to `capable()` is the **identifier path**, a non-empty
+string. A flat name is enough for a private, single-owner channel; use
+`'project/capability'` when several packages share one channel, so their
+capabilities never collide. mycl prepends the [channel](/reference/glossary/#channel)'s name to form
+the capability's **identifier**, its canonical id. A capability belongs to the
+channel whose `capable` minted it: with `createFnChannel('my-app-or-library')`, the identifier
+path `'greet'` becomes the identifier `my-app-or-library:greet`, the name you see in
+error messages and introspection.
+
+```ts
+capable(fn, idPath, config?)
+```
+
+Identifier rules:
+
+- **Mandatory and non-empty.** There is no anonymous capability; an empty path
+  is a type error, and in dev throws when the capability is created.
+- **Any non-empty name works.** Channels are disjoint, so uniqueness only
+  matters within your own channel. When several packages or feature areas
+  share one channel, prefix a project segment (`users/fetch`, `billing/fetch`);
+  further `/` sub-namespacing is fine.
+- **Stable once published.** The identifier is public: it is the error
+  label, the introspection label, and the type-level layer-record key. Renaming a
+  shipped capability's identifier is a breaking change, like renaming an exported
+  symbol.
+
+## Capabilities are plain functions
+
+Because a capability is just a function, you pass it, store it, and compose it
+like any other. One capability can call another, and they all dispatch through
+the same active scope.
+
+<Playground client:only="react" code={capabilitiesCompose} />
+
+## Configuring how bindings combine
+
+The optional third argument, `config`, carries a **layer strategy**: it
+controls how multiple bindings for the same capability combine (accumulate into
+a list, concatenate, and so on) instead of the default last-one-wins. Most
+capabilities never need it. See [Layer strategies](/guide/layer-strategies/).
+
+## Where next
+
+- [Scopes](/guide/scopes/): how a capability finds its implementation at call time.
+- [Registries and layers](/guide/registries-and-layers/): collect, inspect, and compose bindings.
+- [Layer strategies](/guide/layer-strategies/): combine multiple bindings for one capability.
+
+---
+
+# Scopes
+
+> A capability dispatches through the active scope; scope() binds a function to one, and calling a capability with no scope throws loud.
+
+import scopesBind from '../../../examples/scopes-bind.ts?raw';
+import scopesOutside from '../../../examples/scopes-outside.ts?raw';
+import scopesShadow from '../../../examples/scopes-shadow.ts?raw';
+
+A **scope** is the resolved registry active on the call stack when a capability
+is called. That is the whole dispatch mechanism: there is no global registry
+and no ambient default. `scope(fn, registry?)` binds a function to a scope; when
+you call the returned function, that scope is active for the duration of the
+call.
+
+<Playground client:only="react" code={scopesBind} />
+
+## `scope(fn)` and `scope(fn, reg)`
+
+- **`scope(fn)`** with no registry binds an **empty scope**: every capability
+  called inside `fn` falls back to its default. Use it when you want the real
+  call path with no overrides.
+- **`scope(fn, reg)`** binds `reg`: capabilities inside `fn` dispatch through
+  it. `reg` may be a registry, or a precomputed resolved registry.
+
+`scope` returns a new function and resolves the registry once. The scope is not
+active until you call that function, and the function is reusable, dispatching
+through the same resolved bindings on every call.
+
+## Calling with no scope throws
+
+A capability with no scope on the stack has no table to consult and no safe
+default to assume, so it throws instead of guessing. This is deliberate: a
+silent wrong-scope dispatch (running a default you meant to override, or an
+override from an unrelated part of the call tree) is far harder to find than a
+loud failure at the call site.
+
+<Playground client:only="react" code={scopesOutside} />
+
+The error names the capability by its full identifier (`my-app-or-library:greet`), so a
+failure points to the exact capability that ran without a scope.
+
+## Functions that outlive the scope
+
+The scope is synchronous: it is active while the scoped function runs and gone
+once it returns. A callback that is stored or returned and then called _later_
+(after an `await`, in a `setTimeout`, or from a closure that escaped) runs with
+no scope and throws. Capture the scope with `snapshot()` so it replays when the
+callback later runs. See [Snapshots and async](/guide/snapshots-and-async/) for
+the full pattern.
+
+## Scopes don't inherit: each function carries its own
+
+Scopes do not nest dynamically. A function wrapped by `scope()` carries the
+scope it captured and replays it, shadowing whatever scope is active where it is
+called. So the scope a capability sees is the one captured by the nearest
+`scope()` around the code that calls it, not the caller's scope.
+
+<Playground client:only="react" code={scopesShadow} />
+
+## Where next
+
+- [Registries and layers](/guide/registries-and-layers/): build and compose the registries a scope dispatches through.
+- [Snapshots and async](/guide/snapshots-and-async/): carry a scope across async boundaries and escaping callbacks.
+- [Capabilities](/guide/capabilities/): what a scope is dispatching for.
+
+---
+
+# Registries & Layers
+
+> A registry is an immutable collection of bindings: layer to add them, compose by passing several, and swap I/O in tests without a mock library.
+
+import registriesImmutable from '../../../examples/registries-immutable.ts?raw';
+import registriesInspect from '../../../examples/registries-inspect.ts?raw';
+import registriesMerge from '../../../examples/registries-merge.ts?raw';
+import registriesTesting from '../../../examples/registries-testing.ts?raw';
+
+A **registry** is an immutable collection of capability bindings. `registry()`
+makes an empty one; `.layer()` and `.augment()` each return a **new** registry
+with the binding added: the original is never touched. You build registries up,
+then hand them to `scope()` or `mycl()`.
+
+<Playground client:only="react" code={registriesImmutable} />
+
+## A layer is one binding
+
+`.layer(capability, value)` binds a single capability: one **layer**. Because
+every call returns a fresh registry, chaining `.layer(...).layer(...)` simply
+threads each new registry into the next call. Nothing mutates, so you can branch
+off a shared base and the branches stay independent.
+
+## Inspecting a registry
+
+A registry has two read-only methods for introspection, useful in tests,
+tooling, and debugging:
+
+- **`.has(capability)`** returns whether the registry binds that capability.
+- **`.bindings()`** returns a `ReadonlyMap` of every binding, keyed by capability.
+
+<Playground client:only="react" code={registriesInspect} />
+
+## Composing registries
+
+Registries compose: pass several to `mycl()` or `scope()` and they fold into
+one **resolved registry**, the form a scope dispatches against. When two
+registries bind the same capability, the later one wins; augments accumulate
+across all of them. Don't confuse composition with `.layer()`: `.layer()` adds
+one binding to one registry, while composition combines whole registries.
+(The primitive underneath, `merge`, lives on `@mycl/core/factory` for
+[kernel authors](/advanced/building-a-kernel/); the everyday surface composes
+for you.)
+
+<Playground client:only="react" code={registriesMerge} />
+
+## Testing without mocks
+
+Immutability makes a registry the natural test seam. Keep the code under test
+exactly as it ships and bind a test registry that swaps its I/O capabilities for
+in-memory stand-ins. No mock library, no module patching: the capability
+surface is the seam.
+
+<Playground client:only="react" code={registriesTesting} />
+
+The example passes only because both swaps took: if the test registry missed
+`sendEmail`, the real default would throw. That is the seam doing its job.
+
+## Where next
+
+- [Factories](/guide/factories/): bundle registries once and build instances with `mycl()`.
+- [Layer strategies](/guide/layer-strategies/): make multiple bindings for one capability combine instead of overwrite.
+- [Scopes](/guide/scopes/): how a resolved registry becomes active at call time.
+
+---
+
+# Factories
+
+> mycl(make, ...registries) returns a frozen factory: registries resolve once at creation, the builder runs per call and its result comes back verbatim.
+
+import factoriesBuilder from '../../../examples/factories-builder.ts?raw';
+import factoriesExtend from '../../../examples/factories-extend.ts?raw';
+import factoriesPlatforms from '../../../examples/factories-platforms.ts?raw';
+
+`mycl(make, ...registries)` bundles registries into a **factory**, a frozen
+callable. The registries resolve once, when `mycl()` is called. Each time you
+call the factory, your **builder** (`make`) runs inside that one resolved scope
+and whatever it returns (the **instance**) comes back verbatim. Reach for
+`mycl()` when you want to fix a scope up front and then hand out ready-to-use
+instances that dispatch through it.
+
+<Playground client:only="react" code={factoriesBuilder} />
+
+Two build lines print: the builder ran once per call. Both instances read
+`'09:00'` from the same resolved `clock`, and each carries its own `user`. The
+returned object is exactly what the builder produced.
+
+## The instance comes back verbatim
+
+`mycl()` does not inspect, wrap, freeze, or scope-bind the builder's return. It
+runs `make`, and returns the result unchanged. That keeps the factory
+predictable: the shape you build is the shape callers get.
+
+The catch lives in the scope. The resolved scope is active only *while* `make`
+runs. A method on the instance that is called *later*, after the builder has
+returned, is outside that scope and would throw. Wrap any such method in
+`snapshot()` (as `stamp` above does) so it replays the build-time scope when it
+runs. See [Snapshots and async](/guide/snapshots-and-async/) for the full model.
+
+The factory itself is frozen and not extensible: you cannot bolt bindings onto
+it after creation. To add behavior, pass the factory back into `mycl()`.
+
+## Extending a factory
+
+Pass an existing factory as the first argument to fold more registries onto it.
+The factory's own registries fold first; the ones you add fold on top and win on
+conflict. The original factory is untouched.
+
+<Playground client:only="react" code={factoriesExtend} />
+
+`makeLoggingApp` reuses everything `makeApp` was built over and adds the augment
+on top. This is how features, plugins, or test overrides compose onto a base
+factory without editing its definition. See [Augmentation](/guide/augmentation/)
+for what `.augment()` does.
+
+## Declaring requirements with `requires`
+
+Some capabilities have no usable default: their base throws or stubs (a `db`
+handle, the current user) and they only work once a registry binds them.
+`requires(...caps)(make)` declares those up front. It tags `make`'s **type**
+with the identifiers of the capabilities it needs, and returns `make` unchanged.
+
+`requires` is **compile-time only**: zero runtime effect, no wrapper, no
+allocation. The enforcement point is `mycl()`: passing registries that don't
+provide every required capability is a type error that names the missing one.
+Because this check cannot run (it fails at compile time, not at runtime), the
+example below is a static block rather than a live Playground.
+
+```ts
+import { createFnChannel, registry, requires } from '@mycl/core';
+
+const { capable, mycl } = createFnChannel('my-app-or-library');
+
+type Db = { query(id: string): string };
+
+// A required-effect seam: no usable base, so a registry MUST bind it.
+const db = capable((): Db => { throw new Error('no db bound'); }, 'db');
+
+// requires(db)(make) tags make's TYPE with db's identifier and returns make
+// unchanged (zero runtime effect). The check fires later, at mycl().
+const makeApp = requires(db)((id: string) => db().query(id));
+
+// ✓ the registry provides db → compiles.
+mycl(makeApp, registry().layer(db, () => ({ query: (id) => `row ${id}` })));
+
+// ✗ the registry does not provide db → mycl() is where it fails:
+mycl(makeApp, registry());
+//            ~~~~~~~~~~~~ Argument of type 'Registry<readonly []>' is not assignable to
+//   parameter of type '"mycl: registry is missing required capability: my-app-or-library:db"'.
+//   (That literal is produced by mycl's internal MissingCapabilities<M> guard type.)
+```
+
+`requires` is opt-in: a `make` passed to `mycl()` *without* `requires` has an
+empty required set and is never checked, so the bare
+`mycl(make, ...registries)` form keeps working. Reserve it for required-effect
+seams (capabilities whose base throws), not for enrichment capabilities that
+already run fine unbound.
+
+## One builder, many platforms
+
+Because the platform decision lives in a registry, the same builder can run
+anywhere. Keep the builder platform-agnostic (no `if (typeof window)` guards)
+and let the entry point pick the registry that binds the platform capability.
+
+<Playground client:only="react" code={factoriesPlatforms} />
+
+`makeStore` never learns which platform it runs on. Swapping `serverBacking` for
+`localStorage` or an in-memory map is a registry change at the entry point.
+Everything the builder calls stays the same.
+
+## Where next
+
+- [Augmentation](/guide/augmentation/): wrap what a capability resolves to, on top of a factory's registries.
+- [Snapshots and async](/guide/snapshots-and-async/): why builder methods called later must be wrapped in `snapshot()`.
+- [Type guarantees](/advanced/type-guarantees/): how `requires` and the type-level layers enforce completeness at compile time.
+
+---
+
+# Augmentation
+
+> .augment(cap, wrapper) composes around whatever a capability resolves to, so you can observe, transform, or recover from it without replacing the implementation.
+
+import augmentationLogging from '../../../examples/augmentation-logging.ts?raw';
+import augmentationStacking from '../../../examples/augmentation-stacking.ts?raw';
+import augmentationAsync from '../../../examples/augmentation-async.ts?raw';
+import augmentationCanary from '../../../examples/augmentation-canary.ts?raw';
+
+`.augment(cap, wrapper)` wraps whatever a capability resolves to: the layered
+value if a `.layer()` bound one, otherwise the base. Unlike `.layer()`, an
+augment does not replace anything: it composes *around* the resolved
+implementation, which still runs inside it unless the wrapper deliberately skips
+it. Reach for augmentation to log, time, transform a result, or recover from a
+failure without touching the implementation or its call sites.
+
+<Playground client:only="react" code={augmentationLogging} />
+
+## The wrapper, and the helpers
+
+A `wrapper` receives `next` (the callable it wraps) and returns a new callable
+with the same signature. Call `next(...args)` to run the wrapped
+implementation; do anything you like before, after, or instead.
+
+```ts
+const wrapper = (next) => (...args) => {
+  // before...
+  const result = next(...args);
+  // after...
+  return result;
+};
+```
+
+You rarely write that by hand. Four helpers cover the common shapes. Import
+them from `@mycl/core/helpers`:
+
+- **`before(fn)`** runs `fn(...args)` before each call; its return value is
+  ignored. Good for logging inputs, metrics, assertions.
+- **`after(fn)`** runs `fn(result, ...args)` after each call; the result is
+  passed through unchanged.
+- **`pipe(...transforms)`** chains transforms left-to-right over the return
+  value; each transform receives the previous one's output and returns the next.
+- **`handleError(handler, shouldHandle?, { rethrow }?)`** catches a throw (and
+  an async rejection); `handler(error, ...args)` returns the fallback value.
+  Optional `shouldHandle(error)` filters which errors are caught: the rest
+  re-throw. `{ rethrow: true }` runs the handler for side effects only and
+  re-throws the original error.
+
+## Stacking order
+
+Augments nest like an onion. The **first** augment added sits closest to the
+implementation (innermost); each later augment wraps the previous ones. So the
+**last** augment added is outermost: its logic runs first on the way in and
+last on the way out.
+
+<Playground client:only="react" code={augmentationStacking} />
+
+`outer` was added last, so it wraps `inner` and runs first. If a `.layer()`
+binding is present too, the augments wrap the layered value, not the base
+default.
+
+## Async: `after` and `pipe` see the Promise, not the value
+
+:::caution[after and pipe are synchronous]
+`after` and `pipe` operate on the **raw return value**. For an async capability
+that value is the **Promise itself**, not the settled result. If you transform
+an async result with `pipe`, you are transforming the Promise object, almost
+never what you want. To act on the settled value, `await` it yourself inside a
+wrapper (or chain `.then`). `handleError` is the exception: it detects a
+returned Promise and catches its rejection.
+:::
+
+<Playground client:only="react" code={augmentationAsync} />
+
+## Canary rollout with automatic fallback
+
+Augmentation is the tool for a cautious rollout. Layer a new implementation and
+augment it with `handleError` to fall back to the stable one on failure. If the
+new code misbehaves, the old path runs automatically: no redeploy to roll back.
+The fallback lives in the registry, not the implementation: drop the `.layer()`
+binding and the safety net is gone.
+
+<Playground client:only="react" code={augmentationCanary} />
+
+`pay(50)` runs the canary. `pay(200)` throws inside the canary; `handleError`
+catches it (it is an `Error`, so `shouldHandle` passes) and returns
+`stable(200)`. The fallback calls `stable` directly rather than re-dispatching
+`charge`, which would loop straight back into the canary.
+
+## Where next
+
+- [Layer strategies](/guide/layer-strategies/): the other way multiple bindings combine, folding a value rather than wrapping a call.
+- [Registries and layers](/guide/registries-and-layers/): where `.augment()` lives alongside `.layer()`.
+- [Snapshots and async](/guide/snapshots-and-async/): the scope model behind the async caveat above.
+
+---
+
+# Layer Strategies
+
+> Attach a LayerStrategy to a capability: a left fold over its layers (accumulate a list, concatenate strings) instead of the default last-binding-wins.
+
+import strategiesLastwins from '../../../examples/strategies-lastwins.ts?raw';
+import strategiesClasses from '../../../examples/strategies-classes.ts?raw';
+
+By default, the **last** `.layer()` binding for a capability wins. Two layers for
+the same capability, and the later one replaces the earlier one whole. That is
+the right behavior for almost every capability: a replacement is a replacement.
+
+<Playground client:only="react" code={strategiesLastwins} />
+
+Sometimes you want the layers to *combine* rather than compete: a list that
+grows across layers, a set of CSS classes that concatenate, a config object that
+merges field by field. A **layer strategy** is how you say so. It travels with
+the capability, not with any registry, so every registry that layers the
+capability folds the same way.
+
+## The `LayerStrategy` shape
+
+A layer strategy is a **left fold** over the capability's layers, the shape of
+`Array.prototype.reduce`: `step` is the reducer, folding each layer's
+**contributed value** (the value one `.layer()` call feeds in) into the
+accumulated value; `seed` is the optional initial accumulator; `extract`
+projects the final accumulated value into a callable. Two functions, and one
+optional seed:
+
+```ts
+interface LayerStrategy<T, V, Args = [V]> {
+  // Fold one layer's value into the value so far.
+  step: (acc: V | undefined) => (...args: Args) => V;
+  // Project the folded value into the capability's callable.
+  extract: (value: V, base: T) => T;
+  // Optional fold seed; omit it and the first `acc` is `undefined`.
+  seed?: V;
+}
+```
+
+- **`step`** runs once per layer, in registration order. `acc` is the
+  value folded so far and arrives as `V | undefined`: on the first layer there
+  is nothing yet, so it is `undefined`. **The strategy owns that case.** You
+  decide what "no prior value" means (start fresh, seed an empty array, and so
+  on); there is no branching hidden in the resolver, and `seed` is optional.
+  The returned value becomes the next `acc`.
+- **`extract`** runs once, after the last layer. It receives the final folded
+  `value` and the capability's `base` function, and returns the callable
+  dispatch will use. `extract` **must** return a function. If it returns a
+  non-function, dispatch throws with a message naming the offending capability.
+- **`seed`** seeds the fold when you would rather not handle `undefined` in
+  `step`. It is a seed, not a trigger: with no layers, the base still runs
+  even when `seed` is set.
+
+`V` is the accumulated value type; `Args` is the tuple each `.layer()` call
+accepts. For an ordinary capability both collapse to the function itself, which
+is why the default last-wins needs no strategy at all: `step` keeps the
+newest value, `extract` returns it unchanged.
+
+## Accumulating CSS classes
+
+Here a capability's value is a class string, and each layer contributes more
+classes. `step` space-joins them in layer order; `extract` turns the
+final string into the function `buttonClass()` calls.
+
+<Playground client:only="react" code={strategiesClasses} />
+
+`theme` contributes `'bg-blue-600 text-white'`; `compact` contributes
+`'px-2 py-1'`. Neither is a replacement: the strategy folds both. With no layers
+at all, `buttonClass()` falls back to its base, `'btn'`.
+
+This is what a left fold buys: **composition is free**. Layers from composed
+registries fold as one sequence, exactly as if a single registry held them all,
+in registration order within a registry and composition order across
+registries. Two packages can contribute to the same capability without knowing
+about each other, and the result is still one deterministic fold.
+
+## You hand-roll strategies, on purpose
+
+mycl ships **no** strategy library and no `defineStrategy` helper. A layer
+strategy is a plain object with two functions; you write the one your capability
+needs, inline, in a few lines (exactly the CSS example above). That is a
+deliberate line: the substrate ships the fold *mechanism*, and the policy (how
+*your* values combine) stays in your code, where you can read it. There is
+nothing to import and no catalogue to learn.
+
+## Layer strategy vs. augment
+
+A layer strategy and an augment both let several bindings act on one capability,
+on different axes:
+
+- A **layer strategy** folds the *values* that layers contribute into one value.
+  Reach for it when a capability accumulates data: a list, a string, a merged
+  object.
+- An **augment** wraps the *callable* that resolution produces (logging, timing,
+  error recovery) without changing the value. See [Augmentation](/guide/augmentation/).
+
+A layer strategy is also unrelated to registry composition: passing several
+registries to `mycl()`/`scope()` composes whole registries, while a strategy
+folds one capability's layers within whatever registry it lands in.
+
+## Where next
+
+- [Augmentation](/guide/augmentation/): combine bindings by wrapping the call instead of folding the value.
+- [Registries and layers](/guide/registries-and-layers/): where `.layer()` collects the contributions a strategy folds.
+- [Capabilities](/guide/capabilities/): the `config` argument that carries a strategy.
+
+---
+
+# Snapshots & Async
+
+> A scope lives on the synchronous stack, so async callbacks escape it, and snapshot(fn) pins the active scope into a function you can call later while, on Node, alsContext does it automatically.
+
+import snapshotsBoundary from '../../../examples/snapshots-boundary.ts?raw';
+
+A [scope](/guide/scopes/) lives on the synchronous call stack. It is active
+while the scoped function runs and gone the instant control returns. So the code
+*after* an `await`, inside a `.then()`, or in any callback that outlives the
+scope body runs with **no scope on the stack**, and a capability called there
+throws the loud "called outside any registry scope" error.
+
+`snapshot(fn)` is the fix. Called while a scope is active, it captures that
+scope and returns a function that replays it on every later call, no matter when
+or where the call happens.
+
+<Playground client:only="react" code={snapshotsBoundary} />
+
+Wrap it where the boundary is: the callback you hand to `setTimeout`, the
+function inside a `.then()`, the event handler you register, the method your
+`mycl()` builder returns for later use. Capture at the boundary; call whenever.
+
+## `snapshot` captures whatever is active, including no scope
+
+`snapshot` pins the scope active *at call time*, and "no scope" is a valid thing
+to pin. Call `snapshot` with no scope on the stack and the returned function
+replays scopelessness: a capability inside it throws, rather than silently
+adopting whatever scope happens to be active when the function later runs. That
+is deliberate: a missed boundary fails loud at the call site instead of
+dispatching through a stranger's scope. To pin the defaults on purpose, take the
+snapshot inside a `scope(fn)` body with no registry.
+
+This is the counterpart to the [escaping-function rule](/guide/scopes/#functions-that-outlive-the-scope):
+`scope()` establishes a scope up front, `snapshot()` carries an already-active
+one across a boundary.
+
+## Node.js: `alsContext` for automatic propagation
+
+On Node you can retire the manual snapshots entirely. Swap your channel's
+context for `alsContext()`, an `AsyncLocalStorage`-backed
+[`ScopeContext`](/reference/core/#scopecontextr) shipped from
+`@mycl/core/context`, and the scope propagates across `await`, `setTimeout`,
+and microtask boundaries on its own.
+
+This snippet needs Node built-ins the Playground can't run, so it is shown as
+static configuration. Wire it once at startup, wherever you minted the channel:
+
+```ts
+import { setChannelContext } from '@mycl/core';
+import { alsContext } from '@mycl/core/context';
+import { channel } from './kernel'; // your createFnChannel('my-app-or-library') module
+
+setChannelContext(channel, alsContext());
+```
+
+After this, every `scope()` and `mycl()` call for that channel uses
+`AsyncLocalStorage` as its backing store, and capabilities called after an
+`await` dispatch through the right scope automatically. `snapshot` still works.
+It just becomes optional.
+
+`alsContext` resolves `node:async_hooks` lazily, through `process.getBuiltinModule`,
+the first time it is *called*, not through a static import: the entry stays
+browser-safe to import even for consumers that never call it. That lazy lookup
+needs Node 20.16 or newer (or another runtime that provides
+`process.getBuiltinModule`); calling `alsContext()` where it is missing throws
+[error 14](/errors/14/). A `ScopeContext` is just `{ get, run }`, so if you need
+something other than the stack or `AsyncLocalStorage`, for example a test
+harness or a different async-tracking primitive, writing your own stays a
+few lines: see [Building a Kernel](/advanced/building-a-kernel/) for the
+`{ get, run }` contract and a hand-rolled example.
+
+## Browser caveat
+
+Browsers have no `AsyncLocalStorage` (and the `zone.js`-style shims that emulate
+it are not part of mycl). In the browser, `snapshot` is the mechanism: capture at
+every async boundary. The `mycl()` habit of wrapping each builder method in
+`snapshot` covers the common cases: the method carries its scope wherever it is
+later called.
+
+## Where next
+
+- [Scopes](/guide/scopes/): the synchronous scope model these snapshots carry.
+- [Factories](/guide/factories/): why `mycl()` builder methods are wrapped in `snapshot`.
+- [Augmentation](/guide/augmentation/): the async caveat behind `after` and `pipe`.
+
+---
+
+# The Core Substrate
+
+> Why @mycl/core splits into a main entry (the everyday kernel) and substrate subpaths (/helpers, /context, /factory, /introspect), and how to read a registry at runtime.
+
+mycl is one package, `@mycl/core`, with five entry points. The main entry is the
+**everyday surface**: `createFnChannel` hands you a kernel with the factory
+ergonomics (`mycl`, `scope`, `requires`) already wired, plus `registry`
+and the guards, all in one import. The subpaths are the **substrate**: the
+mechanism layer underneath, the part that knows how a capability dispatches, how
+the layer fold runs, and how the type contracts hold, and nothing about *when*
+code runs or how a scope crosses an `await`.
+
+Most people import the main entry and never touch a subpath directly. Reach for
+one when you are building a build plugin, tooling that inspects registries, or a
+kernel with an execution model of its own: anything that needs the mechanism
+alone.
+
+## Why the split exists
+
+The line is mechanism versus policy, drawn at the entry boundary rather than a
+package boundary. The main entry ships the everyday policy already decided
+(the stack context, wired through `createFnChannel`). The substrate subpaths
+ship only mechanism: which context is active, and how a scope propagates across
+an async boundary, is policy, and policy lives in *your* kernel: the module
+where you mint your channel and pick its context. The stack context is the
+simplest policy; a different kernel can pick a different one (an
+`AsyncLocalStorage`-backed context via `alsContext`, a React context, a test
+harness) on the same substrate. See [Building a Kernel](/advanced/building-a-kernel/).
+
+The unit a kernel wires is a **channel**, and the thing that wires it is a
+**connector**: `createChannel(name, connector)` hands the name to the connector, mints
+the channel over the connector's fresh context, and returns the kernel the connector
+builds from the channel's **surface**:
+
+```ts
+import { stackContext } from '@mycl/core/context';
+import { createChannel } from '@mycl/core/factory';
+import type { ChannelSurface } from '@mycl/core/factory';
+
+// The minimal (identity) connector: fresh stack context, surface passthrough.
+const bare = <G extends string>(_name: G) => ({
+  context: stackContext(),
+  build: (surface: ChannelSurface<G>) => surface,
+});
+
+const { capable, snapshot, channel, context } = createChannel('app', bare);
+```
+
+| surface field | what it is |
+|-------|------------|
+| `capable` | the **capability constructor**: mints capabilities that dispatch through this channel |
+| `snapshot` | captures this channel's active scope for replay across an async boundary |
+| `channel` | the channel token: pass it to `setChannelContext` to swap the backing context later |
+| `context` | the channel's live `ScopeContext` (`{ get, run }`): use when you need `run` directly |
+
+The connector behind [`createFnChannel`](/reference/core/#createfnchannel)
+is the everyday one: it builds `{ channel, capable, snapshot, mycl, scope }` from
+this surface (keeping the raw context private). That is all a kernel is: a
+connector's build applied to a channel's surface.
+
+## Subpaths
+
+`@mycl/core` ships five entry points. Import from the narrowest one you need: the
+introspection and factory surfaces stay out of the dispatch critical path.
+
+| entry | what it carries |
+|---------|-----------------|
+| `@mycl/core` (main) | the everyday kernel: `createFnChannel`, `registry`, `requires`, `setChannelContext`, `isCapability`, `isResolvedRegistry`, and the full capability/registry type vocabulary |
+| `@mycl/core/helpers` | augmentation helpers: `before`, `after`, `pipe`, `handleError` |
+| `@mycl/core/context` | `ScopeContext` implementations: `stackContext` (synchronous) and `alsContext` (`AsyncLocalStorage`-backed, Node 20.16+) |
+| `@mycl/core/factory` | the build-plugin and connector-author contract: `createChannel`, `merge`, `Connector`, `ChannelSurface`, `foldBindings`, `resolveContext`, `defineInternal` |
+| `@mycl/core/introspect` | read-only `describe` / `explain` / `diff` over a registry |
+
+`merge` lives on `/factory`, with the kernel authors who call it directly:
+channel users compose by passing registries to `mycl`/`scope`, which run the
+composition themselves. `createChannel` lives on
+`/factory` too, one level above `createFnChannel`, which is exactly one
+application of it.
+
+## Reading a registry at runtime
+
+A registry is immutable and its bindings are inspectable. The
+`@mycl/core/introspect` subpath answers "what does this composed registry bind,
+and what would a capability resolve to?" without invoking anything.
+
+Import the trio as a namespace. `describe` collides with the Vitest/Jest global,
+and these functions are used most inside tests, so the namespace form keeps them
+unambiguous:
+
+```ts
+import * as introspect from '@mycl/core/introspect';
+
+introspect.describe(reg);
+// [{ identity: 'my-app-or-library:db', layers: 1, augments: 0, strategy: 'last-wins' }, …]
+
+introspect.explain(reg, db);
+// { identity: 'my-app-or-library:db', bound: true, resolvesToBase: false, layers: 1, augments: 0, strategy: 'last-wins' }
+
+introspect.diff(before, after);
+// { added: ['my-app-or-library:log'], removed: [], changed: [] }
+```
+
+`explain(reg, cap)` reports what `cap` resolves to (base vs. how many
+layers/augments) without calling it, so a test can assert an override took:
+`expect(introspect.explain(reg, cap).resolvesToBase).toBe(false)`. `diff` keys
+`changed` on a structural signature (layer count + augment count), so it catches
+added or removed contributions but not a changed *value* at the same count.
+
+## Where next
+
+- [Building a Kernel](/advanced/building-a-kernel/): wire your own channel to a context.
+- [Type Guarantees](/advanced/type-guarantees/): how the substrate's type contracts hold.
+- [`@mycl/core` reference](/reference/core/): every export, signature by signature.
+
+---
+
+# Building a Kernel
+
+> Write a connector (a fresh context plus a kernel builder), stand a channel up with createChannel(name, connector), and swap the context later with setChannelContext (AsyncLocalStorage).
+
+A **kernel** is the module that binds a channel to an execution context and
+exports an everyday API. The one-call wiring in the
+[quick start](/getting-started/quick-start/) already is one, on the simplest
+context. This page is the deeper story: what a `ScopeContext` is, how to write
+your own (async propagation, a React tree, an isolated test harness), and how
+to swap a channel's context after the fact.
+
+The examples on this page import `@mycl/core/factory`, `@mycl/core/context`, and
+Node built-ins, so they are shown as static code rather than runnable
+Playgrounds (the Playground only ships `@mycl/core`'s main entry and `/helpers`).
+
+## A ScopeContext holds the active scope
+
+A channel needs one thing from you: a `ScopeContext`, a `{ get, run }` pair that
+stores and retrieves the active resolved registry. It never inspects the value;
+it only holds it.
+
+```ts
+interface ScopeContext<R = unknown> {
+  get: () => R | undefined;
+  run: <T>(value: R | undefined, fn: () => T) => T;
+}
+```
+
+`get` is called on every capability dispatch and returns the current registry, or
+`undefined` when no scope is active. `run` installs `value` for the duration of
+`fn` and returns whatever `fn` returns. Passing `undefined` to `run` pins
+scopelessness: inside `fn`, `get()` returns `undefined` even if an outer scope
+was active.
+
+For synchronous code you do not have to write one. `stackContext()` returns a
+ready `ScopeContext` backed by a push/pop stack, the default choice for
+browsers and synchronous code.
+
+## Write a connector
+
+A **connector** is what [`createChannel`](/reference/core/#createchannel) invokes
+to stand a channel up: a function of the channel name returning the channel's
+fresh context and `build`, which shapes the public kernel from the channel's surface
+(`capable`, `snapshot`, `channel`, `context`). The connector behind
+[`createFnChannel`](/reference/core/#createfnchannel) is the everyday one, and it is
+internal; you write your own when you want a different execution
+model, curating your kernel from the surface alone:
+
+```ts
+import type { Registry } from '@mycl/core';
+import { createChannel, merge } from '@mycl/core/factory';
+import type { ChannelSurface } from '@mycl/core/factory';
+import { alsContext } from '@mycl/core/context';
+
+// A connector with AsyncLocalStorage from the start (no swap needed later).
+// alsContext() mints a fresh store per call, so each channel this connector
+// stands up gets its own: exactly the "mint inside the connector" rule below.
+const alsConnector = <G extends string>(_name: G) => ({
+  context: alsContext(),
+  build: (surface: ChannelSurface<G>) => ({
+    channel: surface.channel,
+    capable: surface.capable,
+    snapshot: surface.snapshot,
+    // This kernel's own boundary: run fn inside a scope over the registries.
+    run: <T>(fn: () => T, ...regs: Registry[]): T =>
+      surface.context.run(merge(...regs), fn),
+  }),
+});
+
+// The connector-author deliverable: a bound factory, your createFnChannel.
+export const createAlsChannel = <const G extends string>(name: G) =>
+  createChannel(name, alsConnector);
+
+export const { capable, snapshot, channel, run } = createAlsChannel('myproject');
+```
+
+The kernel's boundary members are yours to design: this one exposes a bare
+`run`; `createFnChannel`'s exposes `mycl` and `scope`. What every kernel shares
+is the shape underneath: a connector's `build` applied to a channel's surface.
+
+### Want createFnChannel's kernel on a custom context?
+
+Don't write a connector at all: mint the kernel with `createFnChannel` and
+swap the context, as shown in [the section below](#swap-the-context-later).
+The kernel members read the channel's context cell live, so a swap installed
+at module load is indistinguishable from a connector that started with it.
+
+Two rules. **Mint the context inside the connector**: a context closed over from
+outside would be shared by every channel the connector mints, collapsing their
+scopes into one. This is dev-enforced: a context that already backs another
+channel throws [error 16](/errors/16/) at `createChannel` or
+`setChannelContext`. **Keep the connector generic over the name** so the kernel's
+types carry each channel's literal. And the convention: channel users should
+meet your *bound factory* (`createAlsChannel` above, `createFnChannel` for the
+everyday kernel), not `createChannel` or the connector; those are this level's
+tools.
+
+The channel name becomes the leading `channelName:` segment of every
+capability's identifier, so it must not contain a `:` (the delimiter that
+splits an identifier back into channel and path) or a `/` (reserved for path
+segments); `createChannel` rejects a bad name at the type level and, outside
+production, throws [error 12](/errors/12/) at runtime. Channels are disjoint by
+construction: capabilities carry their channel's identifier prefix and dispatch
+through their own context, so two channels never mix.
+
+A library embedding mycl does exactly the same, importing the same entries.
+See [Installation → Library exports](/getting-started/installation/#library-exports).
+
+## Swap the context later
+
+The channel token you exported lets you replace the backing context at any time
+with `setChannelContext(channel, ctx)`. Already-built capabilities pick up the swap on
+their next dispatch: they read the channel's context cell live, so nothing needs
+rebuilding.
+
+The common reason to swap is async propagation. `stackContext` is correct for
+synchronous code but a scope does not survive an `await`. On Node, back the
+channel with [`alsContext`](/reference/core/#alscontext) instead, the shipped
+`AsyncLocalStorage`-backed `ScopeContext` from `@mycl/core/context`, and the
+scope propagates across `await`, `setTimeout`, and microtask boundaries on its
+own:
+
+```ts
+import { setChannelContext } from '@mycl/core';
+import { alsContext } from '@mycl/core/context';
+
+setChannelContext(channel, alsContext());
+```
+
+A `ScopeContext` is just `{ get, run }` (as above), so if `alsContext` is not
+the shape you need, hand-rolling one stays a few lines.
+
+After the swap, `snapshot` still works: it just becomes optional, because the
+context now carries the scope across boundaries for you. In the browser there is
+no `AsyncLocalStorage`, so a stack context plus manual `snapshot` stays the model.
+
+## Where next
+
+- [The Core Substrate](/advanced/core-substrate/): what `createChannel` returns and the subpaths a kernel imports.
+- [Snapshots & Async](/guide/snapshots-and-async/): the async-boundary problem `alsContext` retires.
+- [Duplicate Detection](/advanced/duplicate-detection/): why duplicate copies coexist, and the one hazard that remains.
+
+---
+
+# Type Guarantees
+
+> How mycl's types enforce contracts at the layer boundary: the Capability discriminant, AnyCapability, requires provider-completeness, and reading a registry's type-level layers.
+
+mycl enforces its contracts at compile time. The value you `layer` and the
+wrapper you `augment` must match the capability's declared signature, a
+capability's identifier is part of its type, and `requires` can make a registry
+type-error before it is ever run. This page shows each guarantee and the actual
+compiler error it produces.
+
+The blocks below are static because they are meant *not* to compile. Each shows
+the error TypeScript prints. TypeScript reports resolved signatures, not the alias
+names, so the messages name concrete function types.
+
+## `layer` rejects a mismatched value
+
+`layer(cap, value)` requires `value` to satisfy the capability's full signature.
+An incompatible implementation does not compile:
+
+```ts
+import { createFnChannel, registry } from '@mycl/core';
+
+const { capable } = createFnChannel('my-app-or-library');
+
+const greet = capable((name: string) => `hello ${name}`, 'greet');
+
+registry().layer(greet, (name: number) => `hello ${name}`);
+// error TS2345: Argument of type '(name: number) => string' is not assignable
+//   to parameter of type '(name: string) => string'.
+//     Types of parameters 'name' and 'name' are incompatible.
+//       Type 'string' is not assignable to type 'number'.
+```
+
+## `augment` rejects a signature change
+
+`augment(cap, wrapper)` requires the wrapper to preserve the signature
+end-to-end. Change the return type (or a parameter type) and it does not compile:
+
+```ts
+registry().augment(greet, next => (name: string) => next(name).length);
+// error TS2322: Type '(name: string) => number' is not assignable to
+//   type '(name: string) => string'.
+//     Type 'number' is not assignable to type 'string'.
+```
+
+A wrapper that keeps the signature is accepted:
+
+```ts
+registry().augment(greet, next => (name: string) => next(name).toUpperCase());
+// ✓ still (name: string) => string
+```
+
+## `Capability<T, V, Args, Id>` and identifier as discriminant
+
+A capability's type carries four parameters:
+
+- `T`: the callable signature users invoke.
+- `V`: the value a `layer` contribution stores (equal to `T` for ordinary
+  function capabilities; different when a [layer strategy](/guide/layer-strategies/)
+  accumulates something else).
+- `Args`: the tuple each `layer` call accepts (`[V]` by default).
+- `Id`: the assembled identifier literal, `channelName:idPath`.
+
+`Id` is not just a runtime label. It is a string **literal** in the type,
+preserved by `const` inference from the identifier path you pass to `capable`. Two
+capabilities that share a signature and value contract are still **distinct
+types**, because their identifier literals differ:
+
+```ts
+const a = capable((n: string) => n, 'a'); // Capability<…, 'my-app-or-library:a'>
+const b = capable((n: string) => n, 'b'); // Capability<…, 'my-app-or-library:b'>
+// a and b have identical call signatures but are not interchangeable types.
+```
+
+Because every capability carries a mandatory identifier, a registry's type-level
+**layers** are *total*: they record every layered capability, and same-shaped
+ones never conflate. The value contract `V` is an invariant brand on top of that:
+a capability typed for `string` values is not assignable to one typed for
+`number` values even when their call signatures overlap, which blocks silent
+substitution of capabilities with different semantics.
+
+## `AnyCapability` for heterogeneous collections
+
+Code that operates on capabilities *generically* (a guard, a middleware helper,
+a registry inspector) cannot name a specific `V` or `Id`. `AnyCapability`
+(`Capability<AnyFn, any, any, string>`) is the erased view: enough to invoke or
+key on a capability, without the value-contract brand or a concrete identifier. It
+is what lets a heterogeneous list of capabilities share one type:
+
+```ts
+import type { AnyCapability, Registry } from '@mycl/core';
+
+// Works over any mix of capabilities, whatever each one's value contract is.
+const boundCount = (reg: Registry, caps: AnyCapability[]): number =>
+  caps.filter(cap => reg.has(cap)).length;
+```
+
+`registry().has(cap)` and the map returned by `registry().bindings()` are both
+typed in terms of `AnyCapability` for exactly this reason. Code that *contributes*
+a concrete implementation keeps the full `Capability<T, V, Args, Id>` type so the
+value can be checked; code that *ranges over* capabilities takes `AnyCapability`.
+
+## Provider-completeness with `requires`
+
+The registry's total layers let `mycl` check that the registries you pass actually provide
+what an entry point needs. Wrap a `make` function with `requires(...)` to declare
+its required capabilities; `mycl(make, ...regs)` then type-errors unless the
+registries provide every one, naming any that are missing:
+
+```ts
+import { createFnChannel, registry, requires } from '@mycl/core';
+
+const { capable, mycl } = createFnChannel('my-app-or-library');
+
+type Db = { query: (id: string) => unknown };
+const db = capable((): Db => { throw new Error('no db bound'); }, 'db');
+
+const handler = requires(db)((req: { id: string }) => db().query(req.id));
+
+mycl(handler, registry().layer(db, () => realDb)); // ✓ provides db
+
+mycl(handler, registry());
+// error TS2345: Argument of type 'Registry<readonly []>' is not assignable to
+//   parameter of type '"mycl: registry is missing required capability: my-app-or-library:db"'.
+```
+
+`requires` is **compile-time only, zero runtime**: it returns `make` unchanged;
+the required set is read purely at the type level. It is honest about its bounds:
+
+- The list is **hand-maintained**: it declares intent and cannot read the call
+  graph. Use it for required-effect seams (capabilities whose base throws or
+  stubs); an enrichment capability with a working base need not be listed.
+- It is enforced at **`mycl` only**, not `scope`. Requirements split across
+  several registries union their provided sets.
+- It is **permissive when the layers aren't visible**: a pre-resolved
+  `ResolvedRegistry` (from `merge(...)`) or a build-collapsed registry carries no
+  type-level layers, so the provided set is unknown and the check passes rather than
+  failing falsely. It is sound when it fires, silent when it can't see the layers.
+
+## Reading the layers
+
+The same total layers are readable at the type level. Four readers cover it.
+Note that `CapabilityLayers` takes **two** type parameters (the layers and the capability):
+
+```ts
+import type { RegistryLayers, CapabilityLayers, ProvidedIds, CapabilityId } from '@mycl/core';
+
+const reg = registry().layer(greet, (n: string) => `hi ${n}`);
+
+type Layers  = RegistryLayers<typeof reg>;           // the registry's type-level layers
+type Greets  = CapabilityLayers<Layers, typeof greet>; // layers on `greet`
+type Ids     = ProvidedIds<typeof reg>;              // union of provided identifiers
+type GreetId = CapabilityId<typeof greet>;           // 'my-app-or-library:greet'
+```
+
+`RegistryLayers<R>` extracts a registry's layers tuple; `CapabilityLayers<Layers, Cap>`
+projects the layers on one capability; `ProvidedIds<R>` is the union of
+identifiers the registry provides (what `requires` checks against); `CapabilityId<C>`
+reads a single capability's identifier literal. All four live on `@mycl/core`'s
+main entry, alongside `requires` itself.
+
+## Where next
+
+- [Layer Strategies](/guide/layer-strategies/): when `V` and `Args` diverge from `T`.
+- [The Core Substrate](/advanced/core-substrate/): reading the same bindings at runtime with `describe`/`explain`.
+- [`requires` reference](/reference/core/#requires): the full signature and semantics.
+
+---
+
+# Duplicate Detection
+
+> Why duplicate copies coexist harmlessly by construction, the one real hazard (cross-copy token mixing), the duplicate-identifier guard (error 13), and a self-report recipe for libraries that want startup detection.
+
+Code being loaded twice is normally where plugin systems break. mycl's embedded
+model is built so it mostly cannot: **duplicate copies coexist by
+construction**. This page explains the guarantee, the one genuine hazard that
+remains, the guard mycl ships for it, and a recipe for libraries that want
+more.
+
+## Duplicates coexist by design
+
+A channel lives in the module instance that minted it. If two copies of a
+package that mints a channel load in one realm (a nested install, or a dual
+ESM+CJS load), each copy runs its own channel: capabilities minted by one copy
+dispatch through their own context, scopes activated through one copy bind
+that copy's capabilities, and each copy is fully self-consistent. Nothing
+crashes, nothing corrupts. Two copies of a form library each render their own
+forms correctly.
+
+mycl itself is immune twice over: `@mycl/core` mints no channel of its own and
+touches no realm-global state (every entry is side-effect-free), so duplicate
+copies of *mycl* are simply independent mechanism.
+
+## The one real hazard: cross-copy token mixing
+
+The failure that remains needs a *split import graph* in the consumer: a
+registry built against capability tokens from copy A handed to the runtime of
+copy B. Bindings key on the capability object itself, so copy B's dispatch
+finds nothing and silently falls back to base implementations. Extensions
+appear to register but never apply.
+
+This is the classic npm dual-package hazard (the same class as two copies of
+React disagreeing about hooks), and it is a **packaging problem**: it can only
+happen when the consumer's dependency tree resolves your package to two
+places. To confirm a single copy resolves:
+
+```sh
+pnpm why @myorg/widgets
+```
+
+It should resolve to one version at one path.
+
+## Duplicate-identifier (error 13)
+
+Every capability's identifier is `channelName:idPath`. If two
+capabilities resolve to the *same* identifier, one silently shadows the other
+in tooling and error labels. When `capable` mints a capability whose
+identifier was already seen this realm, it reports via `console.error`, in dev
+and test only:
+
+- It **reports, never throws.** A duplicate identifier does not break
+  dispatch (the dispatch cache keys on the capability object, not its
+  identifier string), and a report avoids false positives under HMR and
+  module re-evaluation.
+- In **production** the check is dropped entirely (the whole dev-only block
+  is dead-code-eliminated).
+
+One cause is a second copy of the package that mints the capability, which
+makes this guard a useful *symptom* of a split graph. The other is two
+unrelated packages colliding on the same `project/capability` path, which is
+why identifier paths are namespaced by project. [Error 13](/errors/13/) names
+the offending identifier.
+
+## Recipe: self-report your own copy
+
+mycl ships no package-level guard (duplicates coexist, so it has nothing to
+detect on its own behalf). If your library wants a loud startup signal when a
+consumer's tree carries two copies of *it*, hand-roll the self-report: a
+realm-global ledger keyed by your package name. The subtle parts are the
+`version (moduleId)` identity and the query-string strip, which keep test
+isolation and Vite HMR (same file, timestamped URL) silent while catching a
+genuine second copy even at the same version:
+
+```ts
+// duplicateGuard.ts: call selfReport() once at your package entry's init.
+const seen: Record<string, Set<string>>
+  = ((globalThis as any)[Symbol.for('myorg.instances')] ??= {});
+
+export const selfReport = (name: string, version: string, moduleId = 'unknown'): void => {
+  const id = moduleId.split('?')[0];
+  const copies = (seen[name] ??= new Set());
+  copies.add(`${version} (${id})`);
+  if (copies.size > 1 && process.env.NODE_ENV !== 'production') {
+    const msg = `[${name}] duplicate copies loaded: ${[...copies].join(' + ')}. `
+      + 'Registries built against one copy cannot bind the other; deduplicate the install.';
+    if (process.env.NODE_ENV === 'development') throw new Error(msg);
+    console.warn(msg);
+  }
+};
+```
+
+```ts
+// your package entry
+import { selfReport } from './duplicateGuard';
+
+selfReport('@myorg/widgets', '1.2.0',
+  typeof __filename === 'string' ? __filename : import.meta.url);
+```
+
+Throw in development (a duplicate is a real bug, fail loud), warn in test
+(runners legitimately load multiple copies; crashing a suite is wrong), stay
+quiet in production or warn there too, your call. Use your own
+`Symbol.for` key; the ledger is your package's, not mycl's.
+
+## Where next
+
+- [Installation](/getting-started/installation/#library-exports): the embedded setup for libraries.
+- [Building a Kernel](/advanced/building-a-kernel/): how channels and the module boundary relate.
+- [Error 13](/errors/13/): the duplicate-identifier message text.
+
+---
+
+# Prior Art
+
+> The established ideas mycl draws on (effects and handlers, the expression problem, microkernels, information hiding, and aspects), each mapped to the part of mycl it informs.
+
+mycl is not a new idea so much as a small, hopefully practical assembly of old ones. If any
+of the names below are familiar, this page is the shortest path to "oh, it's
+*that*." Each section states the idea in plain terms, then maps it to mycl. None
+of this is required reading: the [guide](/guide/capabilities/) stands on its own.
+
+## Effects and handlers
+
+A computation signals an operation; a separate handler decides what that operation
+actually does and returns a result. Because the handler is chosen independently of
+the operation, one operation can be answered many ways: real, in-memory, mocked.
+
+**In mycl terms:** a capability is the operation, a registry is the handler, and
+the active scope is which handler is installed. That is the whole trick behind
+changing *how* without touching *what*. See [Scopes](/guide/scopes/) and
+[Registries and Layers](/guide/registries-and-layers/).
+
+## The expression problem
+
+The classic tension: how do you add new behaviours to existing types, *and* new
+types under existing behaviours, without modifying either party or losing type
+safety? Most designs let you extend along one axis cheaply and pay dearly on the
+other.
+
+**In mycl terms:** a capability's behaviour lives outside the capability itself,
+so any registry (including a third party's) can contribute to it without
+editing the original, and the type system still checks each contribution.
+Extension is by layering into a scope, not by patching source. See
+[Registries and Layers](/guide/registries-and-layers/) and
+[Augmentation](/guide/augmentation/).
+
+## Microkernel and plugin architecture
+
+Second-generation microkernels (L4, seL4) draw a hard line between mechanism and
+policy: the kernel provides only dispatch and validation; everything else is
+user-space. The result is a tiny, stable core with all the variety pushed
+outward.
+
+**In mycl terms:** `@mycl/core`'s substrate subpaths are the microkernel: they
+ship only mechanism (dispatch, the layer fold, the type contracts). Policy (which
+context is active, how a scope crosses an async boundary) lives in the kernel
+above it, like the one `createFnChannel` builds. Each capability is itself a tiny
+core: its base is the mechanism, its layers are the policy. See
+[The Core Substrate](/advanced/core-substrate/) and
+[Building a Kernel](/advanced/building-a-kernel/).
+
+## Information hiding
+
+Parnas (1972): split a system so each module hides one design decision: above all,
+the decision most likely to change. The test of a good seam is that the things it
+separates can be built independently against the seam alone.
+
+**In mycl terms:** a capability is a Parnas module whose secret is the *how*. The
+consumer holds the capability and its contract; whoever supplies the
+implementation is free to change it without the consumer noticing. If two sides of
+a seam can be built against the capability's signature alone, the seam is in the
+right place. See [Capabilities](/guide/capabilities/).
+
+## Cross-cutting concerns
+
+Some concerns (logging, timing, validation, caching) scatter across many
+functions and tangle with the real logic. Aspect-oriented programming pulls such a
+concern into one place and attaches it at named points in the program.
+
+**In mycl terms:** `augment` is that attachment, a capability is the named, first-
+class point it attaches to, and layering is the explicit wiring. Unlike classic
+AOP there are no hidden pointcuts: every join point is a capability you can see
+and name, so there is nothing spooky to trace. See [Augmentation](/guide/augmentation/).
+
+## Where next
+
+- [Capabilities](/guide/capabilities/): the mechanism these ideas converge on.
+- [The Core Substrate](/advanced/core-substrate/): the mechanism/policy split in code.
+- [Glossary](/reference/glossary/): one definition per term, used identically everywhere.
+
+---
+
+# @mycl/core
+
+> Complete API reference for @mycl/core, covering every exported function and type across its five entry points, with signatures, error codes, and minimal examples.
+
+`@mycl/core` is mycl: one package, five entry points. The main entry is the everyday
+surface, one ceremony: mint your channel with [`createFnChannel`](#createfnchannel),
+one import, one call, and work with the kernel it returns plus the registry machinery
+(`registry`, the augmentation helpers, [`requires`](#requires)). The subpaths
+below it are the substrate: `/helpers` (augmentation helpers, deliberately not on
+main), `/context` (`ScopeContext` implementations for kernel authors), `/factory`
+(the connector and build-plugin contract), and `/introspect` (read-only registry
+inspection). Connector authors, the level above the everyday surface, work against
+`/factory` directly (`createChannel` and the [`Connector`](#connector) contract);
+the connector behind `createFnChannel` is itself internal. Every entry is
+side-effect-free.
+
+```bash
+pnpm add @mycl/core
+```
+
+Every example below shares one running kernel and a `fetchUser` capability:
+
+```ts
+import { createFnChannel } from '@mycl/core';
+
+const { capable, snapshot, channel, mycl, scope } = createFnChannel('my-app-or-library');
+
+const fetchUser = capable(
+  async (id: string) => ({ id, name: 'base' }),
+  'fetchUser',
+); // full identifier: 'my-app-or-library:fetchUser'
+```
+
+---
+
+## `@mycl/core` (main entry)
+
+```ts
+import {
+  createFnChannel, registry, requires,
+  setChannelContext, isCapability, isResolvedRegistry,
+} from '@mycl/core';
+```
+
+### `createFnChannel`
+
+```ts
+createFnChannel<const G extends string>(name: G): FnKernel<G>
+```
+
+Mint a channel with the plain-function kernel bound to it: `FnKernel<G>` is `{ channel, capable, snapshot, mycl, scope }`. This is the whole ceremony; each call mints a fresh, isolated channel, and `name` becomes the identifier prefix of every capability minted through the kernel's `capable`. The raw context is deliberately absent from the kernel (the substrate stays private; swap contexts through [`setChannelContext`](#setchannelcontext) with the `channel` token).
+
+```ts
+import { createFnChannel } from '@mycl/core';
+
+const { capable, snapshot, channel, mycl, scope } = createFnChannel('my-app-or-library');
+```
+
+Under the hood it is one application of the mechanism: [`createChannel`](#createchannel) (on `/factory`) applied to an internal connector. For a custom context (say `AsyncLocalStorage` on Node), mint the channel and swap its context with [`setChannelContext`](#setchannelcontext); connector authors building a different kernel shape work against `/factory`'s [`Connector`](#connector) contract and export their own bound factory. See [Building a Kernel](/advanced/building-a-kernel/).
+
+**Errors:** a name containing `:` or `/` is a type error and, outside production, throws [error 12](/errors/12/) at runtime.
+
+### `capable`
+
+```ts
+// on the kernel createFnChannel returns, for channel name G:
+capable<T extends AnyFn, V = T, Args extends unknown[] = [V], const Id extends string = string>(
+  baseFn: T | Capability<T, any, any, any>,
+  idPath: IdPath<Id>,
+  config?: CapableConfig<T, V, Args>,
+): Capability<T, V, Args, `${G}:${Id}`>
+```
+
+Create a capability from a default implementation. `capable` is not a package export: it comes on the kernel [`createFnChannel`](#createfnchannel) returns (and on the [`ChannelSurface`](/reference/core/#channelsurfaceg) every connector receives), pre-bound to your channel. The returned [`Capability`](#capabilityt-v-args-id) is a plain callable that dispatches through the active scope, falling back to `baseFn` when nothing is bound. It is simultaneously its own registry key, its type contract, its default implementation, and its stable identifier.
+
+The mandatory `idPath` is a non-empty **identifier path**. A flat name is enough for a private, single-owner channel; use `'project/capability'` when several packages share one channel, so their capabilities never collide. A capability belongs to the channel whose `capable` minted it, so with `createFnChannel('my-app-or-library')` and idPath `'fetchUser'` the full identifier becomes `my-app-or-library:fetchUser`. The optional `config.strategy` is a [`LayerStrategy`](#layerstrategyt-v-args) that changes how `.layer()` contributions fold. See [Layer strategies](/guide/layer-strategies/). See [Capability identifier](#capability-identifier) for the full model.
+
+```ts
+const fetchUser = capable(
+  async (id: string) => ({ id, name: 'base' }),
+  'fetchUser',
+);
+```
+
+**Errors:** the identifier path is validated in dev: an empty path throws [error 11](/errors/11/). A second capability minted with the same full identifier is, in dev, reported to the console (`console.error`), [error 13](/errors/13/); it does not throw. Calling the returned capability with no active scope throws [error 1](/errors/1/); a binding that resolves to a non-function throws [error 2](/errors/2/).
+
+### Capability identifier
+
+Every capability carries a mandatory **identifier** string. `capable(baseFn, idPath, config?)` takes the **identifier path** as its second argument, and the channel prepends its own name to form the full identifier `name:idPath`. Any non-empty path works (channels are disjoint, so uniqueness only matters within one channel); a flat path is enough for a private, single-owner channel, and reaching for the `project/capability` shape when several packages share one channel gives three segments:
+
+| Segment | Example | Owned by | Supplied at |
+|---------|---------|----------|-------------|
+| channel | `app` | whoever defines the capability *channel* | `createFnChannel('my-app-or-library')` (or `createChannel('my-app-or-library', connector)`) |
+| project | `demo` | the package *minting* capabilities into that channel | the `idPath` argument to `capable` |
+| capability | `greet` | the individual capability | the `idPath` argument to `capable` |
+
+The identifier-path type is enforced by the [`IdPath`](#idpathid) validator: any non-empty literal passes; an empty one is replaced by a self-describing message type. Structure beyond non-emptiness is convention, not contract, and uniqueness within a channel is the author's responsibility.
+
+- An empty identifier path from an untyped (JS) caller throws [error 11](/errors/11/) (**dev only**).
+- A duplicate assembled identifier is reported via `console.error` ([error 13](/errors/13/)). This is **dev only, not a throw**. A duplicate corrupts the type-level layers and introspection labels but does not break dispatch, which keys on the capability object itself, not its identifier string; a `console.error` (rather than a throw) also avoids false positives under HMR / module re-evaluation.
+
+The identifier does triple duty: the **type-level layer-record key** (making the registry's layers total and every capability type-distinguishable; see [`Capability`](#capabilityt-v-args-id)), the **runtime error/debug label** ([error 1](/errors/1/) and [error 2](/errors/2/) name it), and the **introspection label**. Because it is a stable public identifier, changing a published capability's identifier is a breaking change.
+
+### `registry`
+
+```ts
+registry(): Registry<readonly []>
+```
+
+Create a fresh, frozen, empty [`Registry`](#registryl). Every `.layer()` and `.augment()` call returns a **new** registry (clone-on-write); nothing mutates in place. It starts with an empty type-level layer record (`readonly []`) so a `.layer` chain builds a precise per-registry layers tuple.
+
+```ts
+import { registry } from '@mycl/core';
+import { after } from '@mycl/core/helpers';
+
+const testReg = registry()
+  .layer(fetchUser, async (id) => ({ id, name: 'mock' }))
+  .augment(fetchUser, after((u) => console.log('fetched', u)));
+```
+
+The registry never accepts a caller-built bindings map: bindings flow in only through its two derivation methods, which keeps the binding value shape an internal invariant the runtime relies on. The registry carries four methods:
+
+#### `.layer(cap, ...args)`
+
+```ts
+layer<T extends AnyFn, V, Args extends unknown[], Id extends string, const A extends Args>(
+  cap: Capability<T, V, Args, Id>, ...args: A
+): Registry<readonly [...L, { cap: Capability<T, V, Args, Id>; args: A }]>
+```
+
+Bind a capability to an implementation (or, for a capability with a custom strategy, a contribution). The args are spread into the capability's `step` fold. Under the default last-wins strategy the final `.layer()` call for a capability is the one dispatched; custom strategies accumulate across calls. Each layer is also recorded in the registry's type-level layers.
+
+**Errors:** throws [error 5](/errors/5/) if `cap` is not a capability, and [error 6](/errors/6/) if the contribution is rejected by the strategy (default: an `undefined` value).
+
+#### `.augment(cap, wrapper)`
+
+```ts
+augment<T extends AnyFn>(cap: Capability<T, any, any, any>, wrapper: AugmentWrapper<T>): Registry<L>
+```
+
+Wrap whatever the capability resolves to, without replacing it. `wrapper` is an [`AugmentWrapper<T>`](#augmentwrapperf): a raw `next => (...args) => …` function, or the result of a helper (`before`, `after`, `pipe`, `handleError`). Augments always apply, even when nothing is layered (they wrap the base). Multiple augments compose outer-wraps-inner. See [Augmentation](/guide/augmentation/).
+
+**Errors:** throws [error 7](/errors/7/) if `cap` is not a capability and [error 8](/errors/8/) if `wrapper` is not a function. In **dev only**, a canary probe additionally rejects a builder-style argument (`h => h.after(fn)`) up front rather than at first dispatch: [error 9](/errors/9/) for a builder-shaped value, [error 10](/errors/10/) if the wrapper throws during the probe. This block is dead-code-eliminated in production.
+
+#### `.has(cap)`
+
+```ts
+has(cap: AnyCapability): boolean
+```
+
+Report whether the registry holds any binding (a layer or an augment) for `cap`.
+
+#### `.bindings()`
+
+```ts
+bindings(): RegistryBindings
+```
+
+Return the registry's internal capability-to-binding-value map as a [`RegistryBindings`](#registrybindings). Read-only; primarily for introspection (see [`/introspect`](#myclcoreintrospect)) and build tooling.
+
+### `scope`
+
+```ts
+scope<T extends AnyFn>(fn: T): Snapshotted<T>
+scope<T extends AnyFn>(fn: T, reg: Registry | ResolvedRegistry): Snapshotted<T>
+```
+
+Bind a function to a registry scope and return a call-signature-only wrapper (own properties of `fn` are dropped; the result is a [`Snapshotted<T>`](#snapshottedt)). Every call to the wrapper replays that scope. Pass a [`Registry`](#registryl) or a pre-composed [`ResolvedRegistry`](#resolvedregistry); with no second argument, `scope(fn)` pins the **base** behavior: capabilities inside fall back to their default implementations regardless of any ambient scope.
+
+```ts
+const base  = scope(() => fetchUser('42'));           // pins base implementations
+const bound = scope(() => fetchUser('42'), testReg);  // pins to testReg
+bound();
+```
+
+`scope` is not a package export: it comes on the kernel [`createFnChannel`](#createfnchannel)
+returns, as in the running kernel above. Its function type is exported as `Scope`
+(and `mycl`'s as `Mycl`), so a kernel module can annotate what it re-exports:
+`export const scope: Scope = kernel.scope`.
+
+**Errors:** `scope` always establishes a scope (empty when none is given), so capabilities called inside never throw [error 1](/errors/1/): they resolve to their base. A binding whose strategy assembles a non-function still surfaces [error 2](/errors/2/) at call time. See [Scopes](/guide/scopes/).
+
+### `mycl`
+
+```ts
+mycl<F extends AnyFn, const Regs extends readonly Registry[]>(
+  make: F,
+  ...registries: [Exclude<RequiredIds<F>, ProvidedIds<Regs[number]>>] extends [never]
+    ? Regs
+    : readonly [MissingCapabilities<Exclude<RequiredIds<F>, ProvidedIds<Regs[number]>>>]
+): MyclFactory<ReturnType<F>, Parameters<F>, readonly [...StoredRegs<F>, ...Regs]>
+```
+
+Build a factory. `mycl(make, ...regs)` returns a frozen [`MyclFactory`](#myclfactory): the registries resolve **once** at creation, and each call runs `make(...args)` inside that resolved scope, returning its result verbatim: `mycl` does not inspect, walk, scope-bind, or freeze the result. There is a single signature: because a `MyclFactory` is structurally a `(...args) => T`, passing one back as `make` matches the same call. When you do, its stored registries are merged **ahead** of the newly-passed ones and a fresh factory is built (detected at runtime via an internal brand), on the factory's **own channel**: a factory stays on its channel when extended, even by another channel's `mycl`.
+
+The stored registry tuple is threaded onto the factory type: nothing the call site knew is erased. Read it back with [`SuppliedRegistries`](#suppliedregistries) and compose with `RegistryLayers` / `CapabilityLayers` / `ProvidedIds` to introspect a factory at the type level.
+
+When `make` is wrapped with [`requires(...)`](#requires), `mycl` also performs a **provider-completeness check**: it type-errors unless the passed registries provide every required capability, naming any that are missing. An unwrapped `make` has no requirements, so the check passes vacuously. This check is compile-time only: it raises no runtime error, and it is enforced at `mycl`, not at `scope`.
+
+```ts
+const createApp = mycl(
+  () => ({ getUser: snapshot((id: string) => fetchUser(id)) }),
+  testReg,
+);
+const app = createApp();
+
+const createExtended = mycl(createApp, loggingReg); // extends: testReg + loggingReg
+```
+
+`mycl` is not a package export: it comes on the kernel [`createFnChannel`](#createfnchannel)
+returns, as in the running kernel above.
+
+**Errors:** provider-completeness is a compile-time type error, not a throw. At runtime, a capability invoked **after** `make` returns (inside a callback that was not wrapped in [`snapshot`](#snapshot)) has lost the resolved scope and throws [error 1](/errors/1/). See [Factories](/guide/factories/).
+
+### `requires`
+
+```ts
+requires<const Caps extends readonly AnyCapability[]>(...caps: Caps):
+  <F extends AnyFn>(make: F) => Requiring<F, CapabilityId<Caps[number]>>
+```
+
+**Compile-time only, with zero runtime effect.** Declare the capabilities an entry function requires its registry to provide. Curried: `requires(db, currentUser)(make)` returns `make` **unchanged at runtime** and tags its *type* with the union of those capabilities' identifiers (e.g. `'my-app-or-library:db' | 'my-app-or-library:currentUser'`). The enforcement point is [`mycl(make, ...regs)`](#mycl), which then type-errors unless the registries provide every tagged identifier, naming any that are missing. The currency is capability **values**, not identifier strings: refactor-safe and autocompleting.
+
+```ts
+import { registry, requires } from '@mycl/core';
+
+const db = capable((): Db => { throw new Error('no db bound'); }, 'db');
+
+const handler = requires(db)((req: Req) => db().query(req.id));
+
+mycl(handler, registry().layer(db, () => realDb)); // ✓ provides db
+mycl(handler, registry());
+// ✗ type error: mycl: registry is missing required capability: my-app-or-library:db
+```
+
+Opt-in: a `make` passed to `mycl` without `requires` has an empty required set and is unchecked. Intended for **required-effect seams**: capabilities whose base throws or stubs (like `db` above); enrichment capabilities with a usable base need not be listed. Worth knowing: the list is hand-maintained (it cannot read the call body); it is enforced at `mycl` only; and it is **permissive when the registry's layers are not visible**: passing a pre-resolved `ResolvedRegistry` (from `merge(...)`) or a build-collapsed registry makes the provided set unknown, so the check passes rather than failing falsely.
+
+**Errors:** none; `requires` has no runtime behavior.
+
+### `snapshot`
+
+```ts
+snapshot<T extends AnyFn>(fn: T): Snapshotted<T>
+```
+
+Pin the currently-active scope (including "no scope") onto `fn` and replay it on every later call: the manual carrier across async boundaries. Returns a call-signature-only wrapper (a [`Snapshotted<T>`](#snapshottedt)): `this`, params, and return type are preserved, own properties are dropped, and a capability passed in comes back de-branded. Call `snapshot` **while a scope is active** (inside a `mycl` factory, or a synchronous call chain it initiates); the returned wrapper then carries that scope into deferred callbacks.
+
+```ts
+const createApp = mycl(() => ({
+  load: snapshot(async (id: string) => {
+    const finish = snapshot((u: User) => fetchUser(u.id)); // scope preserved in .then()
+    return fetchUser(id).then(finish);
+  }),
+}), testReg);
+```
+
+`snapshot` comes on the kernel [`createFnChannel`](#createfnchannel) returns, pre-bound to
+your channel, as in the running kernel above.
+
+**Errors:** if `snapshot` captures a moment with no active scope, the replayed wrapper dispatches capabilities without one and throws [error 1](/errors/1/), the loud signal of a missed async boundary. On Node, [`alsContext`](#alscontext) retires manual snapshotting for automatic propagation instead. See [Snapshots and async](/guide/snapshots-and-async/).
+
+### `channel` (the token on your kernel)
+
+```ts
+channel: Channel<G>   // on the kernel createFnChannel returns
+```
+
+Your channel's token (a [`Channel`](#channelg)), on the kernel alongside `capable`/`snapshot`/`mycl`/`scope`. Pass it to [`setChannelContext`](#setchannelcontext) to swap the channel's backing context, for example to install [`alsContext`](#alscontext) for automatic async scope propagation instead of manual `snapshot`.
+
+```ts
+import { setChannelContext } from '@mycl/core';
+import { alsContext } from '@mycl/core/context';
+import { channel } from './kernel'; // your createFnChannel('my-app-or-library') module
+
+setChannelContext(channel, alsContext());
+```
+
+### `setChannelContext`
+
+```ts
+setChannelContext(channel: Channel, ctx: ScopeContext<ResolvedRegistry>): void
+```
+
+Swap the [`ScopeContext`](#scopecontextr) backing an existing channel, in place. The swap is visible immediately to **every** capability and snapshot already built from that channel: dispatch reads the channel's mutable context cell live, so no per-call lookup and no rebuild are needed. This is how you install [`alsContext`](#alscontext) (or any custom context) once at startup. Throws [error 3](/errors/3/) if `channel` is not a valid channel. A context instance belongs to **one** channel: installing one that already backs another channel throws [error 16](/errors/16/) in dev, because a shared context would merge the channels' scopes (see [Channels are disjoint](/guide/channels/#channels-are-disjoint)). Mint a fresh context per channel.
+
+```ts
+import { setChannelContext } from '@mycl/core';
+import { alsContext } from '@mycl/core/context';
+import { channel } from './kernel'; // your createFnChannel('my-app-or-library') module
+
+setChannelContext(channel, alsContext());
+```
+
+### `isCapability`
+
+```ts
+isCapability(value: unknown): value is AnyCapability
+```
+
+Type guard: `true` if `value` is a capability created by any `capable()` call in the same realm (it carries the package's global brand symbol). Narrows to [`AnyCapability`](#anycapability).
+
+### `isResolvedRegistry`
+
+```ts
+isResolvedRegistry(reg: Registry | ResolvedRegistry): reg is ResolvedRegistry
+```
+
+Type guard: `true` if `reg` is a [`ResolvedRegistry`](#resolvedregistry) (it exposes `resolve`) rather than a buildable [`Registry`](#registryl).
+
+---
+
+### Types (root)
+
+Every type below is exported from `@mycl/core`'s main entry. Import with `import type`.
+
+#### `FnKernel<G>`
+
+```ts
+interface FnKernel<G extends string> {
+  channel: Channel<G>;
+  capable: ChannelSurface<G>['capable'];
+  snapshot: ChannelSurface<G>['snapshot'];
+  mycl: Mycl;
+  scope: Scope;
+}
+```
+
+The kernel shape [`createFnChannel`](#createfnchannel) returns: the channel-bound everyday surface, without the raw context. You rarely write this by hand; it is what `createFnChannel(name)` produces.
+
+#### `MyclFactory<T, Args, Regs>`
+
+```ts
+type MyclFactory<
+  T = unknown,
+  Args extends any[] = any[],
+  Regs extends readonly Registry[] = readonly Registry[],
+> = ((...args: Args) => T) & { readonly [MYCL_META]: MyclFactoryMeta<Regs> }
+```
+
+The frozen callable returned by [`mycl`](#mycl). `T` is `make`'s return type, `Args` its parameters, `Regs` the stored registry tuple (extension appends to it). You rarely write this by hand: it is what a `mycl(...)` call produces; annotate a variable with it when passing a factory across a module boundary.
+
+#### `SuppliedRegistries<F>`
+
+```ts
+type SuppliedRegistries<F> =
+  F extends { readonly [MYCL_META]: MyclFactoryMeta<infer Regs> } ? Regs : never
+```
+
+The registry tuple a factory was built over (`never` for a non-factory). The single factory-level reader. Everything else composes from the core readers:
+
+```ts
+type Regs   = SuppliedRegistries<typeof createApp>;   // the stored registry tuple
+type Layers = RegistryLayers<Regs[number]>;           // combined type-level layers
+type Caps   = CapabilityLayers<Layers, typeof fetchUser>; // layers on fetchUser
+type Ids    = ProvidedIds<Regs[number]>;              // provided capability identifiers
+```
+
+#### `Requiring<F, R>`
+
+```ts
+type Requiring<F extends AnyFn, R extends string> = F & { readonly [REQUIRES]: R }
+```
+
+A `make` function tagged with the union `R` of capability identifiers it requires: the return type of [`requires(...)(make)`](#requires). You seldom name it; it flows automatically from `requires` into `mycl`'s provider-completeness check.
+
+#### `RequiredIds<F>`
+
+```ts
+type RequiredIds<F> = F extends { readonly [REQUIRES]: infer R extends string } ? R : never
+```
+
+Extract the required-identifier union tagged on a make (`never` when unwrapped). Used internally by `mycl`; occasionally handy when writing a wrapper over `mycl` that needs to read a make's requirements.
+
+#### `Mycl` and `Scope`
+
+```ts
+interface Mycl {
+  <F extends AnyFn, const Regs extends readonly Registry[]>(
+    make: F, ...registries: Regs /* or a MissingCapabilities message, see mycl() */
+  ): MyclFactory<ReturnType<F>, Parameters<F>, readonly [...StoredRegs<F>, ...Regs]>;
+}
+
+type Scope = {
+  <T extends AnyFn>(fn: T): Snapshotted<T>;
+  <T extends AnyFn>(fn: T, reg: Registry | ResolvedRegistry): Snapshotted<T>;
+};
+```
+
+The call-signature types of [`mycl`](#mycl) and [`scope`](#scope) as they appear on a kernel. Annotate a re-export with them: `export const scope: Scope = kernel.scope`.
+
+#### `ChannelName<G>`
+
+```ts
+type ChannelName<G extends string> = G extends `${string}${':' | '/'}${string}`
+  ? `mycl: channel name must not contain ':' or '/', got '${G}'` : G
+```
+
+Rejects a channel name containing the `:` or `/` identifier separators at the type level: a clean name passes through unchanged (literal inference of `G` intact), an offending one is replaced by a self-describing message type, so the compiler error names the culprit instead of collapsing to `never`. [`createChannel`](#createchannel)'s `name` parameter uses this; a bound factory like `createFnChannel` validates identically.
+
+#### `Channel<G>`
+
+```ts
+interface Channel<G extends string = string> {
+  readonly [CHANNEL_KEY]: symbol;
+  readonly name: G;
+}
+```
+
+The opaque channel token returned as `channel` from [`createFnChannel`](#createfnchannel) (or [`createChannel`](#createchannel)). Its hidden symbol proves provenance. Pass it to [`setChannelContext`](#setchannelcontext).
+
+#### `ScopeContext<R>`
+
+```ts
+interface ScopeContext<R = unknown> {
+  get: () => R | undefined;
+  run: <T>(value: R | undefined, fn: () => T) => T;
+}
+```
+
+Scoped access to a value: stores and retrieves, never inspects. `get` returns the active value or `undefined` when no scope is active; `run` executes `fn` within the scope of `value` and must be synchronous. Passing `undefined` to `run` **pins scopelessness**: inside `fn`, `get()` returns `undefined` even when an outer scope is active. A channel requires `ScopeContext<ResolvedRegistry>`. [`stackContext`](#stackcontext) and [`alsContext`](#alscontext), both on `/context`, are the built-in implementations.
+
+#### `LayerStrategy<T, V, Args>`
+
+```ts
+interface LayerStrategy<T extends AnyFn, V, Args extends unknown[] = [V]> {
+  extract: (value: V, base: T) => T;
+  step: (acc: V | undefined) => (...args: Args) => V;
+  seed?: V;
+}
+```
+
+The **layer strategy** on a capability: a left fold (the shape of `reduce`) over its `.layer()` values:
+
+- `step(acc)(...args)`: the fold function; `acc` is the value folded so far, `undefined` for the first layer (the strategy owns the no-prior-value case, no resolver branching).
+- `extract(value, base)`: projects the final folded value into a callable `T`; `base` is the prior stage's result, or the capability's base function for the first stage. Must return a function: a non-function makes dispatch throw [error 2](/errors/2/).
+- `seed`: optional initial accumulator. It seeds `step`; it does **not** trigger the strategy. With zero layers, dispatch falls through to the base regardless.
+
+Because it is a left fold, composition is free: layers from composed registries fold as one sequence, in registration order within a registry and composition order across registries, so contributors never coordinate.
+
+With no strategy a capability uses the implicit default: last-wins `step`, an identity-function `extract`. This is a **layer strategy** (it folds `.layer()` values), unrelated to [`merge()`](#merge). See [Layer strategies](/guide/layer-strategies/).
+
+#### `AnyFn`
+
+```ts
+type AnyFn = (...args: any[]) => unknown
+```
+
+The unconstrained function bound used throughout the capability generics. Params are `any[]` so every function satisfies it; the return is `unknown` to stop leakage.
+
+#### `AugmentWrapper<F>`
+
+```ts
+type AugmentWrapper<F extends AnyFn = AnyFn> = (next: F) => F
+```
+
+The unit `.augment()` composes: takes the next callable in the chain and returns a new one of the same signature (outer wraps inner wraps base). Write it directly, or produce one with a [helper](#myclcorehelpers).
+
+#### `Transform<T>`
+
+```ts
+type Transform<T extends AnyFn> = (value: ReturnType<T>) => ReturnType<T>
+```
+
+A single result transformer in a [`pipe`](#pipe) chain: maps the capability's return value to a new value of the same type.
+
+#### `Capability<T, V, Args, Id>`
+
+```ts
+type Capability<T extends AnyFn = AnyFn, V = T, Args extends unknown[] = [V], Id extends string = string>
+```
+
+The full nominal type produced by `capable()`. `T` is the callable signature (what users call). `V` is the value stored in a registry (what `.layer()` contributions accumulate into). `Args` is the tuple each `.layer()` call accepts. For ordinary function capabilities `V = T` and `Args = [V]`; ignore both. `Id` is the assembled identifier literal (`name:project/capability`), an invariant brand that makes two otherwise identically-shaped capabilities distinct types (the discriminant behind a registry's total layers). See [Type guarantees](/advanced/type-guarantees/#capabilityt-v-args-id-and-identifier-as-discriminant).
+
+#### `AnyCapability`
+
+```ts
+type AnyCapability = Capability<AnyFn, any, any, string>
+```
+
+The runtime-erasure view: any capability, with its value/identifier contracts intentionally discarded. Used wherever code only needs to *invoke* or *key on* a capability, not honor its value contract: `.augment`, `.has`, `explain`, the guards.
+
+#### `IdPath<Id>`
+
+```ts
+type IdPath<Id extends string>
+```
+
+The type-level validator for the string `capable()` takes as `idPath`: any non-empty literal passes through unchanged; an empty one is replaced by a self-describing message type, so the compiler error says why instead of collapsing to a generic mismatch.
+
+#### `CapableConfig<T, V, Args>`
+
+```ts
+interface CapableConfig<T extends AnyFn = AnyFn, V = T, Args extends unknown[] = [V]> {
+  strategy?: LayerStrategy<T, V, Args>;
+}
+```
+
+The optional third argument to `capable(baseFn, idPath, config)`. Its only field is `strategy`, which selects custom layer-fold semantics. The identifier path is a mandatory positional argument, **not** a config field.
+
+#### `Snapshotted<T>`
+
+```ts
+type Snapshotted<T extends AnyFn> =
+  (this: ThisParameterType<T>, ...args: Parameters<T>) => ReturnType<T>
+```
+
+The return type of `snapshot(fn)` (and a kernel's `scope(fn, reg?)`). A call-signature-only wrapper: `this`, params, and return type match `T`; own properties are dropped (a capability passed in comes back de-branded).
+
+#### `CapabilityId<C>`
+
+```ts
+type CapabilityId<C extends AnyCapability> = /* C's identifier literal */
+```
+
+A capability's assembled identifier literal (`name:project/capability`), read straight off its identifier slot.
+
+#### `AccumulatedValue<C>`
+
+```ts
+type AccumulatedValue<C extends AnyCapability> = /* C's V */
+```
+
+The value type `V` a capability accumulates in the registry (`T` for a plain capability): the type `.layer()` contributions fold into, read straight off `C`'s invariant contract slot.
+
+#### `LayerArgs<C>`
+
+```ts
+type LayerArgs<C extends AnyCapability> = /* C's Args */
+```
+
+The tuple each `.layer()` call accepts for a capability (`[T]` for a plain capability), read off the same contract slot as [`AccumulatedValue`](#accumulatedvaluec).
+
+#### `Registry<L>`
+
+The type of an immutable, clone-on-write registry, parameterized by its type-level layers `L` (a `readonly RegistryLayer[]`). Exposes `.layer`, `.augment`, `.has`, `.bindings` (see [`registry`](#registry)).
+
+#### `RegistryBindings`
+
+```ts
+type RegistryBindings = ReadonlyMap<AnyCapability, RegistryBindingValue>
+```
+
+The capability→binding-value map a registry stores, returned by [`.bindings()`](#bindings). The `RegistryBindingValue` shape is an internal binding record (layer args and boxed augments) and is intentionally **not** root-exported: read it through [introspection](#myclcoreintrospect), not by hand.
+
+#### `ResolvedRegistry`
+
+```ts
+interface ResolvedRegistry {
+  resolve: (capability: AnyCapability) => AnyFn | null;
+}
+```
+
+The composed, dispatch-ready output of [`merge`](#merge) (or built internally by a kernel's `scope`), and the only form a scope dispatches against. Its single `resolve` method maps a capability to the function to call (or `null` for the base), and must return the same result for the same capability for the registry's lifetime: the dispatch cache assumes this; build a new `ResolvedRegistry` when bindings change.
+
+#### `RegistryLayer`
+
+```ts
+type RegistryLayer = { cap: AnyCapability; args: readonly unknown[] }
+```
+
+One layer recorded in a registry's **type-level layers**: the type-level record of a `.layer(cap, ...args)` call. Because every capability has an identifier, the registry's layers are **total**: they record every layered capability, not an opt-in subset.
+
+#### `RegistryLayers<R>`
+
+```ts
+type RegistryLayers<R> = R extends Registry<infer L> ? L : never
+```
+
+Extracts a registry type's type-level layers tuple `L`.
+
+#### `CapabilityLayers<L, C>`
+
+```ts
+type CapabilityLayers<L extends readonly RegistryLayer[], C extends AnyCapability>
+```
+
+The layers in `L` layered onto a specific capability `C`. Takes **two** type parameters (the layers tuple and the capability) and filters by the capability's identifier literal (its 4th type param), so it selects `C`'s layers even among same-shaped capabilities.
+
+#### `ProvidedIds<R>`
+
+```ts
+type ProvidedIds<R> = R extends Registry<infer L> ? CapabilityId<L[number]['cap']> : never
+```
+
+The union of capability identifiers a registry provides, read off its type-level layers. Distributes over a union of registries, so `ProvidedIds<RegA | RegB>` unions both. This is the type a kernel's provider-completeness check measures a `requires` set against. See [Provider-completeness](/advanced/type-guarantees/#provider-completeness-with-requires).
+
+---
+
+## `@mycl/core/helpers`
+
+Standalone augmentation helpers: pure generics over a capability's function type `T`, inferred at the `.augment(cap, …)` call site. Each returns an [`AugmentWrapper<T>`](#augmentwrapperf). Deliberately not on the main entry; import from here whenever you augment.
+
+```ts
+import { before, after, pipe, handleError } from '@mycl/core/helpers';
+```
+
+### `before`
+
+```ts
+before<T extends AnyFn>(fn: (...args: Parameters<T>) => void): AugmentWrapper<T>
+```
+
+Build an augment that runs `fn` with the call's arguments **before** the capability executes. The return value of `fn` is ignored; the capability's result passes through untouched.
+
+```ts
+import { registry } from '@mycl/core';
+import { before } from '@mycl/core/helpers';
+
+registry().augment(fetchUser, before((id) => console.log('fetching', id)));
+```
+
+### `after`
+
+```ts
+after<T extends AnyFn>(fn: (result: ReturnType<T>, ...args: Parameters<T>) => void): AugmentWrapper<T>
+```
+
+Build an augment that runs `fn` with the result and the original arguments **after** the capability executes; the original result passes through. **Async caveat:** the result is observed as-is, so for an async capability that is the *Promise*, not the settled value; `await` inside `fn` if you need it. See [Augmentation](/guide/augmentation/).
+
+### `pipe`
+
+```ts
+pipe<T extends AnyFn>(...fns: Transform<T>[]): AugmentWrapper<T>
+```
+
+Build an augment that threads the capability's return value through one or more [`Transform<T>`](#transformt) functions left-to-right. **Async caveat:** sync-only, so for an async capability the value piped is the *Promise*. See [Augmentation](/guide/augmentation/).
+
+### `handleError`
+
+```ts
+handleError<T extends AnyFn>(
+  handler: (error: unknown, ...args: Parameters<T>) => ReturnType<T> | Awaited<ReturnType<T>>,
+  shouldHandle?: (error: unknown) => boolean,
+  options?: { rethrow?: boolean },
+): AugmentWrapper<T>
+```
+
+Build an augment that catches sync throws **and** async rejections (any thenable) from the capability, replacing the result with `handler(error, ...args)`. Pass `shouldHandle` to filter which errors are caught: errors it rejects re-throw. With `{ rethrow: true }` the handler runs for side effects only: its return value is discarded and the original error rethrows. This is the one augmentation helper that catches across the async boundary.
+
+```ts
+import { registry } from '@mycl/core';
+import { handleError } from '@mycl/core/helpers';
+
+const canaryReg = registry()
+  .layer(processPayment, newPaymentImpl)
+  .augment(processPayment, handleError(
+    (err, ...args) => { reportError(err); return oldPaymentImpl(...args); },
+    (err) => err instanceof PaymentError,
+  ));
+```
+
+---
+
+## `@mycl/core/context`
+
+`ScopeContext` implementations, for kernel authors wiring a channel's backing store.
+
+```ts
+import { stackContext, alsContext } from '@mycl/core/context';
+import type { ScopeContext } from '@mycl/core';
+```
+
+### `stackContext`
+
+```ts
+stackContext<R = ResolvedRegistry>(): ScopeContext<R>
+```
+
+Create a fresh synchronous, stack-based [`ScopeContext`](#scopecontextr), the built-in default. `run` pushes the value onto a stack for the duration of `fn` and always pops after; `get` reads the top. `R` defaults to `ResolvedRegistry` (what `createChannel` expects), so `stackContext()` needs no annotation in the common case.
+
+Correct for synchronous code and tests. It does **not** propagate scope across `await` boundaries. For that, install [`alsContext`](#alscontext) via [`setChannelContext`](#setchannelcontext), or carry scope manually with `snapshot`.
+
+### `alsContext`
+
+```ts
+alsContext(): ScopeContext<ResolvedRegistry>
+```
+
+Create an `AsyncLocalStorage`-backed [`ScopeContext`](#scopecontextr): one store minted per call, carrying the scoped registry across `await`, `setTimeout`, and microtask boundaries inside `run`. Install it with [`setChannelContext`](#setchannelcontext) to retire manual `snapshot` calls on Node:
+
+```ts
+import { setChannelContext } from '@mycl/core';
+import { alsContext } from '@mycl/core/context';
+import { channel } from './kernel'; // your createFnChannel('my-app-or-library') module
+
+setChannelContext(channel, alsContext());
+```
+
+The `node:async_hooks` builtin resolves **lazily**, through `process.getBuiltinModule`, the first time `alsContext()` is *called*, never through a static import: the module stays browser-safe to import even for consumers that never call it, so importing `@mycl/core/context` cannot break a browser build on its own. That lazy resolution needs Node 20.16 or newer (or another runtime that provides `process.getBuiltinModule`); this is `alsContext`'s own floor, not the package's, everything else in mycl runs anywhere.
+
+**Errors:** throws [error 14](/errors/14/) where `process.getBuiltinModule` is unavailable. Reach for [`stackContext`](#stackcontext) there instead, or install your own `ScopeContext` (it is just `{ get, run }`). See [Snapshots and async](/guide/snapshots-and-async/).
+
+---
+
+## `@mycl/core/factory`
+
+:::caution[Connector and build-plugin authors only]
+This is the contract one level above the everyday surface: connector authors
+writing a kernel like `createFnChannel`'s, and build tooling that folds
+registries ahead of time. It is **not** a general-purpose user API; symbols
+here may change as the contract evolves. Ordinary application code never
+imports this subpath.
+:::
+
+```ts
+import { createChannel, merge, foldBindings, resolveContext, defineInternal } from '@mycl/core/factory';
+import type { Connector, ChannelSurface } from '@mycl/core/factory';
+```
+
+One more export, `resolveSnapshot`, is intentionally undocumented: `createFnChannel`'s internal scope binder composes it, and it is not part of the documented surface.
+
+### `createChannel`
+
+```ts
+createChannel<const G extends string, K>(
+  name: G,  // must not contain ':' or '/' (enforced at the type level)
+  connector: Connector<G, K>,
+): K
+```
+
+Create a named **channel** for a **connector**, the once-per-kernel call that stands up a runtime. `createChannel` hands `name` to the connector, mints the channel over the connector's fresh context, and returns the kernel the connector's `build` curates from the channel's [`ChannelSurface`](#channelsurfaceg). There is no connectorless form: a channel always belongs to the connector that operates it, and its context never escapes, so two channels cannot share a scope stack by accident.
+
+The channel `name` (e.g. `'app'`) becomes the leading `name:` segment of every capability identifier minted through this channel's `capable` (see [Capability identifier](#capability-identifier)). The name **must not contain `:` or `/`**: banning `:` keeps the first `:` an unambiguous delimiter, so distinct name/path pairs can never assemble the same identifier, and `/` is reserved as the path segment separator. A name with either is a type error, and in dev throws [error 12](/errors/12/). Dots are fine (`my.kernel` is valid).
+
+```ts
+import { stackContext } from '@mycl/core/context';
+import { createChannel } from '@mycl/core/factory';
+import type { ChannelSurface } from '@mycl/core/factory';
+
+const myConnector = <G extends string>(_name: G) => ({
+  context: stackContext(),
+  build: (surface: ChannelSurface<G>) => surface, // curate your kernel here
+});
+
+const { capable, snapshot, channel, context } = createChannel('my.kernel', myConnector);
+
+const greet = capable((name: string) => `hi ${name}`, 'greet');
+// greet identifier: 'my.kernel:greet'
+```
+
+[`createFnChannel`](#createfnchannel) is exactly one such call bound to an internal connector. See [Building a Kernel](/advanced/building-a-kernel/) for the full walkthrough, including writing a connector of your own.
+
+### `merge`
+
+```ts
+merge(...registries: Registry[]): ResolvedRegistry
+```
+
+Compose whole registries into a single [`ResolvedRegistry`](#resolvedregistry), the dispatch-ready form a scope runs against. Later registries win per capability; augments accumulate across all of them. `merge()` with no arguments is the empty resolved registry. The same registry sequence (by object identity, in order) always returns the **same** instance, cached on a composite-symbol trie.
+
+This is the composition primitive a kernel's boundary members are built on: `mycl` and `scope` call it internally on their variadic registries, which is why channel users never import it. Reach for it directly when *you* are the kernel: a connector's boundary member runs a scope by hand, and a build plugin precomputes the resolved form.
+
+```ts
+import { merge } from '@mycl/core/factory';
+
+// A connector's boundary member: run fn inside a scope over the registries.
+run: <T>(fn: () => T, ...regs: Registry[]): T =>
+  surface.context.run(merge(...regs), fn),
+```
+
+A precomputed `ResolvedRegistry` is still accepted by any kernel's `scope`/`mycl` as the **sole** scope source (`scope(fn, resolved)`), so tooling can hand its output back to the everyday surface.
+
+**Errors:** `merge` composes lazily and does not throw for valid registries. If a capability's `LayerStrategy.extract` returns a non-function, that surfaces as [error 2](/errors/2/) when the resolved scope dispatches the capability. A `ResolvedRegistry` cannot be re-composed: passing one to `merge` throws [error 15](/errors/15/) in dev.
+
+### `Connector`
+
+```ts
+type Connector<G extends string, K> = (name: G) => {
+  context: ScopeContext<ResolvedRegistry>;
+  build(surface: ChannelSurface<G>): K;
+};
+```
+
+The per-environment bundle [`createChannel`](#createchannel) invokes: a function of the channel name returning the channel's **fresh context** and `build`, which shapes the public kernel `K` from the channel's [`ChannelSurface`](#channelsurfaceg). Core defines and invokes this contract but never implements one (the same pattern as `LayerStrategy`): the everyday implementation is the internal connector behind [`createFnChannel`](#createfnchannel), and a custom connector is how you pick a different context (e.g. [`alsContext`](#alscontext) from the start) or curate a different kernel surface.
+
+Two rules for connector authors:
+
+- **Mint the context inside the connector.** A context closed over from outside is shared by every channel the connector mints, collapsing their scopes into one.
+- **Write your connector generic over `G`** (`<G extends string>(name: G) => …`) so the kernel type carries each channel's name literal. The name parameter is the type-level carrier; it is also legitimately useful for diagnostics.
+
+The minimal **identity connector**, for tooling and infrastructure that want the raw channel surface:
+
+```ts
+const bare = <G extends string>(_name: G) => ({
+  context: stackContext(),
+  build: (surface: ChannelSurface<G>) => surface,
+});
+const { capable, snapshot, channel, context } = createChannel('infra', bare);
+```
+
+### `ChannelSurface<G>`
+
+```ts
+interface ChannelSurface<G extends string = string> {
+  capable: <T extends AnyFn, V = T, Args extends unknown[] = [V], const Id extends string = string>(
+    baseFn: T | Capability<T, any, any, any>,
+    idPath: IdPath<Id>,
+    config?: CapableConfig<T, V, Args>,
+  ) => Capability<T, V, Args, `${G}:${Id}`>;
+  snapshot: <T extends AnyFn>(fn: T) => Snapshotted<T>;
+  channel: Channel<G>;
+  context: ScopeContext<ResolvedRegistry>;
+}
+```
+
+Everything core exposes per channel (capable, snapshot, token, context facade), handed to a [`Connector`](#connector)'s `build`, which curates it into the kernel (and what the identity connector returns verbatim). `capable` prefixes the channel name `G` onto the identifier path to form the `${G}:${Id}` identifier carried in the capability's type; `context` is the live facade that follows [`setChannelContext`](#setchannelcontext) swaps. What of this reaches users is each connector's choice: `createFnChannel`'s connector passes on everything but `context`.
+
+### `foldBindings`
+
+```ts
+foldBindings(
+  cap: AnyCapability,
+  // one binding per contributing registry; augments arrive boxed and are unboxed here
+  entries: Iterable<{ argsList?: ReadonlyArray<ReadonlyArray<unknown>>; augments: ReadonlyArray<readonly [AugmentWrapper]> }>,
+): AnyFn | null
+```
+
+The single fold both the runtime path (`merge`, after it dedups a registry sequence into canonical binding values) and the build-plugin path route through, so the two can never compute a capability differently. Each binding's `augments` arrive as boxed singleton tuples, the shape `RegistryBindingValue` also carries at rest; `foldBindings` unboxes them as it collects. A build plugin folds a capability's collapsed binding stream through this eagerly, at module init, and stores the result (`AnyFn` = dispatch to it, `null` = use the base) in its own keying structure: typically a `WeakMap<AnyCapability, AnyFn | null>` behind a plain frozen [`ResolvedRegistry`](#resolvedregistry), which `scope`/`mycl` accept through the existing passthrough with no separate build-plugin code path.
+
+### `resolveContext`
+
+```ts
+resolveContext(channel: Channel): ScopeContext<ResolvedRegistry>
+```
+
+The channel-keyed context accessor, for kernel authors who hold only the channel token. Returns a forwarding facade over the channel's context: it captures the channel's context cell once (validating provenance eagerly, [error 3](/errors/3/)) and reads the live context per call, so the facade follows [`setChannelContext`](#setchannelcontext) swaps made after it was created. `createChannel` builds its `.context` field through this; `createFnChannel`'s internal `mycl` and `scope` binders are its main consumers.
+
+### `defineInternal`
+
+```ts
+defineInternal<T extends object>(obj: T, key: PropertyKey, value: unknown): void
+```
+
+Define a non-writable, non-enumerable property: the substrate's helper for stamping capabilities and channel tokens with their hidden symbol slots. Exported for kernels that stamp their own internal metadata the same way.
+
+The capability symbols (tag, base, config, id, cache) stay private to the substrate: [`isCapability`](#iscapability) is the public detection surface.
+
+---
+
+## `@mycl/core/introspect`
+
+Three **pure, read-only** functions over a [`Registry`](#registryl). They never mutate, do I/O, or **invoke a capability**: they describe a registry's bindings and what a capability *would* resolve to, computed from the same entry shape dispatch reads. They live on their own subpath to stay out of the core critical-path bundle: you pay for them only if you import them. Being deterministic over the immutable registry makes them both an audit/test primitive and the runtime counterpart to the compile-time [provider-completeness check](/advanced/type-guarantees/#provider-completeness-with-requires).
+
+`describe` collides with the Vitest/Jest test global exactly where introspection is most used. Import the namespace to keep both:
+
+```ts
+import * as introspect from '@mycl/core/introspect';
+
+introspect.describe(reg);    // [{ identity: 'my-app-or-library:db', layers: 1, augments: 0, strategy: 'last-wins' }, …]
+introspect.explain(reg, db); // { identity: 'my-app-or-library:db', bound: true, resolvesToBase: false, layers: 1, augments: 0, strategy: 'last-wins' }
+introspect.diff(regA, regB); // { added: ['my-app-or-library:log'], removed: [], changed: [] }
+```
+
+### `describe`
+
+```ts
+describe(reg: Registry): CapabilityDescription[]
+```
+
+List every capability `reg` binds. Each row is `{ identity, layers, augments, strategy }`.
+
+### `explain`
+
+```ts
+explain(reg: Registry, cap: AnyCapability): Explanation
+```
+
+What `cap` resolves to under `reg`, **without invoking it**: the debugging answer to "is my override taking?". Returns the `CapabilityDescription` fields plus `bound` (the registry carries any contribution for `cap`) and `resolvesToBase` (nothing is bound, so dispatch falls through to the capability's base). For example, `expect(explain(reg, cap).resolvesToBase).toBe(false)` asserts an override is in place.
+
+### `diff`
+
+```ts
+diff(regA: Registry, regB: Registry): RegistryDiff
+```
+
+Capability identities `{ added, removed, changed }` between two registries. `changed` is detected by a structural signature (layer count + augment count), so it catches added or removed contributions, but **not** a changed *value* at the same count (that would need a deep argument comparison).
+
+### Introspection types
+
+#### `StrategyKind`
+
+```ts
+type StrategyKind = 'last-wins' | 'custom'
+```
+
+Whether a capability merges via the implicit last-wins default or a custom [`LayerStrategy`](#layerstrategyt-v-args).
+
+#### `CapabilityDescription`
+
+```ts
+interface CapabilityDescription {
+  identity: string;
+  layers: number;    // count of .layer(cap, …) contributions
+  augments: number;  // count of .augment(cap, …) wrappers
+  strategy: StrategyKind;
+}
+```
+
+One row of [`describe`](#describe).
+
+#### `Explanation`
+
+```ts
+interface Explanation extends CapabilityDescription {
+  bound: boolean;          // registry carries any contribution for this capability
+  resolvesToBase: boolean; // nothing bound → dispatch falls through to the base
+}
+```
+
+The result of [`explain`](#explain).
+
+#### `RegistryDiff`
+
+```ts
+interface RegistryDiff {
+  added: string[];
+  removed: string[];
+  changed: string[];
+}
+```
+
+The result of [`diff`](#diff): identities in each bucket.
+
+---
+
+## Where next
+
+- [Capabilities guide](/guide/capabilities/): the mental model behind `capable`.
+- [Factories guide](/guide/factories/): `mycl`, `scope`, and `snapshot` in practice.
+- [Building a Kernel](/advanced/building-a-kernel/): the `/factory` and `/context` subpaths, for connector authors.
+- [The Core Substrate](/advanced/core-substrate/): how the entry split fits together.
+
+---
+
+# Glossary
+
+> Every mycl term, defined once.
+
+One entry per term, alphabetized. **Bold** words inside a definition name another entry on this page. *Appears in* links go to the reference and guide pages where the term is defined in full.
+
+## augment
+
+A wrapper applied via `.augment(cap, wrapper)` that composes around whatever the capability resolves to, without replacing it.
+
+*Not to be confused with:* a **layer**; a decorator/AOP pointcut.
+*Appears in:* [`.augment()`](/reference/core/#augmentcap-wrapper); [helpers](/reference/core/#myclcorehelpers); [Augmentation guide](/guide/augmentation/).
+
+## binding
+
+One entry of a registry: a capability and everything bound to it, its layers and augments. The map returned by `.bindings()` holds one binding per capability; the value half is `RegistryBindingValue`.
+
+*Not to be confused with:* a **layer** (one `.layer()` call); an **augment** (one `.augment()` call); the ECMAScript sense of binding (a name bound to a value in a scope).
+*Appears in:* [`.bindings()`](/reference/core/#bindings); [`RegistryBindings`](/reference/core/#registrybindings).
+
+## builder (`make`)
+
+The function passed as `mycl()`'s first argument; constructs and returns the instance, run inside the resolved scope.
+
+*Not to be confused with:* a JS class constructor; the returned **factory**.
+*Appears in:* [`mycl()`](/reference/core/#mycl).
+
+## capability
+
+A function wrapped by `capable()` that is simultaneously its own registry key, type contract, default implementation, and stable identifier, dispatching through the active scope when called.
+
+*Not to be confused with:* a plain imported function; a class/service.
+*Appears in:* [`capable`](/reference/core/#capable), [Capability identifier](/reference/core/#capability-identifier); [Capabilities guide](/guide/capabilities/).
+
+## capability constructor
+
+The bound `capable`: the function that mints capabilities for a channel, returned by `createChannel`/`createFnChannel`.
+
+*Not to be confused with:* a JS constructor; a **factory**.
+*Appears in:* [`capable`](/reference/core/#capable).
+
+## channel
+
+A named capability namespace (`createChannel(name, connector)`) owning the `channel:` identifier prefix; the unit of context ownership and duplicate detection. Channels are disjoint by construction; each owns exactly one context.
+
+*Not to be confused with:* a **registry**; a package.
+*Appears in:* [`@mycl/core`](/reference/core/#createchannel); [kernel guide](/advanced/building-a-kernel/).
+
+## connector
+
+What `createChannel` invokes to stand a channel up: a function of the channel name returning the channel's fresh context and `build`, which shapes the public kernel from the channel's surface. The everyday one is internal, behind `createFnChannel`; custom connectors pick other contexts or curate other surfaces.
+
+*Not to be confused with:* the **context** it mints; the **kernel** its build returns.
+*Appears in:* [`Connector`](/reference/core/#connector); [`createFnChannel`](/reference/core/#createfnchannel); [kernel guide](/advanced/building-a-kernel/).
+
+## context
+
+A `ScopeContext` (`{ get, run }`) telling a channel how to read and set the active resolved registry; swappable via `setChannelContext`.
+
+*Not to be confused with:* a **scope** (the state the context carries).
+*Appears in:* [`@mycl/core`](/reference/core/#scopecontextr); [kernel guide](/advanced/building-a-kernel/).
+
+## dispatch
+
+The call-time resolution a capability performs: consult the active scope, run the bound/folded/augmented implementation, else the base.
+
+*Not to be confused with:* binding (`.layer`); composition (`merge()`).
+*Appears in:* [Scopes guide](/guide/scopes/).
+
+## duplicate detection
+
+The **duplicate-identifier** guard: `capable` reports (dev/test `console.error`, never throws) when two capabilities assemble one identifier, error 13. Duplicate *packages* need no guard: copies coexist by construction, and a library wanting a startup self-report hand-rolls the documented recipe.
+
+*Not to be confused with:* a package-copy guard (mycl ships none).
+*Appears in:* [error 13](/errors/13/); [Duplicate detection page](/advanced/duplicate-detection/).
+
+## factory
+
+The frozen callable returned by `mycl(make, ...regs)`; registries resolve once at creation, `make` runs per call, its result returned verbatim.
+
+*Not to be confused with:* the **substrate**; the **capability constructor**; the **builder**.
+*Appears in:* [`mycl()`](/reference/core/#mycl); [Factories guide](/guide/factories/).
+
+## identifier
+
+The assembled `channel:idPath` string (a flat `channel:idPath` for a private channel, or `channel:project/capability` when several packages share one, e.g. `my-app-or-library:fetchUser`): a capability's canonical public identifier, error label, and type-level layer-record key.
+
+*Not to be confused with:* the **identifier path** argument; the capability object itself, which is what dispatch keys on, not this string.
+*Appears in:* [`capable()`](/reference/core/#capable); [error 1](/errors/1/), [error 2](/errors/2/); [Capability identifier](/reference/core/#capability-identifier).
+
+## identifier path
+
+The non-empty string you pass to `capable()` as `idPath` (conventionally `project/capability`); the channel name is prepended to form the full identifier.
+
+*Not to be confused with:* the full **identifier**; a file path.
+*Appears in:* [`capable()` signature](/reference/core/#capable); [error 11](/errors/11/).
+
+## kernel
+
+The module that stands a channel up and exports an everyday API; the quick-start's one-call `createFnChannel(name)` module is one. What a connector's `build` returns.
+
+*Not to be confused with:* the **substrate** it builds on; a build plugin.
+*Appears in:* [core-substrate page](/advanced/core-substrate/).
+
+## layer
+
+A single capability binding contributed by one `.layer(cap, value)` call: the folded unit within a registry.
+
+*Not to be confused with:* a whole registry in a stack; `LayerStrategy`; `merge()`.
+*Appears in:* [`.layer()`](/reference/core/#layercap-args); [Registries and layers guide](/guide/registries-and-layers/#a-layer-is-one-binding).
+
+## layer strategy
+
+The `LayerStrategy` on a capability: a left fold over its `.layer()` values. **step** is the fold function (`acc: V | undefined`, so the strategy owns the no-prior-value case), **extract** projects the accumulated value into the callable, optional **seed** is the initial accumulator; default last-wins.
+
+*Not to be confused with:* `merge()`; "merge strategy" (misnomer); an **augment**.
+*Appears in:* [`capable()` config](/reference/core/#layerstrategyt-v-args); [Layer strategies guide](/guide/layer-strategies/).
+
+## layers (type-level)
+
+The `Registry<L>` type-level tuple recording every layered entry; read with `RegistryLayers`/`CapabilityLayers`/`ProvidedIds`.
+
+*Not to be confused with:* any runtime value.
+*Appears in:* [Type guarantees page](/advanced/type-guarantees/#reading-the-layers).
+
+## merge
+
+The free function `merge(...registries)` composing whole registries into one resolved registry: later wins per capability, augments accumulate. Lives on `@mycl/core/factory`; `mycl()`/`scope()` call it internally on their variadic registries, so channel users never import it.
+
+*Not to be confused with:* `.layer()`; a **layer strategy**.
+*Appears in:* [`merge`](/reference/core/#merge).
+
+## provider-completeness
+
+The compile-time check where `requires(...caps)(make)` makes `mycl(make, ...regs)` type-error unless the registries provide every required capability. Type-only; zero runtime effect.
+
+*Not to be confused with:* a runtime check; introspection.
+*Appears in:* [`requires`](/reference/core/#requires); [Type guarantees page](/advanced/type-guarantees/#provider-completeness-with-requires).
+
+## registry
+
+An immutable, clone-on-write, keyed collection of per-capability **bindings** (`.layer()`/`.augment()`) created by `registry()`; every operation returns a new one.
+
+*Not to be confused with:* a **resolved registry**; a **layer**; a **binding**.
+*Appears in:* [`@mycl/core`](/reference/core/#registryl).
+
+## resolved registry
+
+The composed, dispatch-ready output of `merge()` (or built internally by `scope()`/`mycl()`); the only form a scope dispatches against.
+
+*Not to be confused with:* a buildable `Registry`; a **scope**.
+*Appears in:* [`merge`](/reference/core/#merge) / [`scope`](/reference/core/#scope) / [`mycl`](/reference/core/#mycl) signatures; [`ResolvedRegistry`](/reference/core/#resolvedregistry).
+
+## scope
+
+The active resolved registry on the call stack at invocation time; capabilities dispatch through it; calling with no scope throws loud.
+
+*Not to be confused with:* a **context** (the mechanism carrying it); a registry.
+*Appears in:* [`scope()`](/reference/core/#scope); [Scopes guide](/guide/scopes/).
+
+## snapshot
+
+`snapshot(fn)` captures the scope active at call time (including "no scope") and replays it on every later invocation: the manual async-boundary carrier.
+
+*Not to be confused with:* `scope(fn)` (declares a scope up front); a data snapshot.
+*Appears in:* [`@mycl/core`](/reference/core/#snapshot); [Snapshots and async guide](/guide/snapshots-and-async/).
+
+## substrate
+
+The mechanism layer under the everyday surface (capability dispatch, the strategy fold, type contracts), shipped on `@mycl/core`'s subpaths; what kernels build on.
+
+*Not to be confused with:* a **kernel**; mycl-the-whole-library.
+*Appears in:* [`@mycl/core`](/reference/core/).
+
+---
+
+# Changelog
+
+> Release history for @mycl/core, one section per published version.
+
+## 0.1.0 (2026-07-20)
+
+Initial release: the capability/registry core. `createFnChannel` mints a
+private channel with the everyday kernel (`capable`, `snapshot`, `mycl`,
+`scope`, the `channel` token); `registry` and `requires` build and check
+registries, and `mycl`/`scope` compose their variadic registries themselves.
+Augmentation helpers ship on `/helpers`, `ScopeContext` implementations on
+`/context`, the connector contract (including `merge`) on `/factory`, and
+read-only registry introspection on `/introspect`. ESM-only, TypeScript 5.4
+or newer, main entry under 2 KB min+gz.
+
+---
+
+# Using mycl (for agents)
+
+> Terse operating manual for AI agents reading, writing, and extending mycl code, covering invariants, conventions, recipes, and a drop-in AGENTS.md block.
+
+Machine-optimized reference. Rules first, prose last. If you write mycl code, obey §2 exactly.
+
+## 1. What mycl is
+
+mycl is a **capability/registry system** for TypeScript, not a DI framework. A **capability** is a function you call normally; a **registry** re-binds what that call runs, per **scope**, at the composition root. Layer defaults and overrides into an immutable registry, activate it for a call tree, and every capability inside dispatches through it. Call sites never change.
+
+> Mental model: **a capability is a function whose behavior the caller can re-bind per scope without touching the call site.**
+
+One package, `@mycl/core`, five entry points. The main entry is the everyday surface: `createFnChannel` (whose kernel carries `capable`, `snapshot`, `mycl`, `scope`, and the `channel` token; these are kernel members, **not** package exports), plus `registry`, `requires`, `setChannelContext`, and the guards; `/helpers` holds the augment helpers (`before`/`after`/`pipe`/`handleError`, deliberately not on main); `/context`, `/factory` (including `merge`, the composition primitive `mycl`/`scope` call internally), and `/introspect` are the substrate subpaths kernel and connector authors build on. Default to the main entry.
+
+## 2. Invariants (never violate)
+
+- **Registries are immutable.** Every `.layer()` / `.augment()` returns a **new** registry (clone-on-write); nothing mutates in place. Keep the returned value.
+- **Capability identifier path is mandatory and non-empty** (convention: `project/capability` when several areas share a channel), and **stable once published**: it is the public id, error label, and type-level layer-record key. Changing it is a breaking change.
+- **Error codes are stable and never renumbered.** Match on the code, never the message.
+- **Scope is synchronous.** A capability called after an `await`, in a `.then()`, a timer, or any deferred callback has lost the scope and throws error 1. Carry it across the boundary with `snapshot`.
+- **Layer strategies own the `undefined`-acc case.** `step` receives `acc: V | undefined`; the strategy decides what "no prior value" means. No branching hides in the resolver; `seed` is optional.
+- **Augments compose first-added innermost, last-added outermost.** So at call time the last-added augment runs first and delegates inward to the base.
+- **Core ships mechanism, not policy.** There is **no** strategy library and no `defineStrategy`: you hand-roll strategies (§5.4). This is deliberate; do not look for one.
+- **`requires(...)` is compile-time only.** It tags a make's type and is enforced at `mycl(...)`; it has zero runtime effect and raises no throw.
+
+## 3. Conventions (follow in any mycl-using project)
+
+- **Expose capabilities from a `./capabilities` package export** so consumers import the capability *value* (refactor-safe) rather than an identifier string:
+
+  ```json
+  "exports": {
+    ".": { "types": "./dist/index.d.ts", "import": "./dist/index.mjs" },
+    "./capabilities": { "types": "./dist/capabilities/index.d.ts", "import": "./dist/capabilities/index.mjs" }
+  }
+  ```
+
+- **Libraries take `@mycl/core` as a regular or peer dependency** (regular for the simplest install, peer to share one copy across libraries) and mint a private channel behind their own entry point: duplicate copies of mycl coexist harmlessly (channels are disjoint by construction, and every entry is side-effect-free). The real hazard is a consumer's tree resolving *your* package twice: registries built against one copy's capability tokens silently fall back to base in the other. That is a packaging problem, not a mycl setting. See [Installation → Library exports](/getting-started/installation/#library-exports) and [Duplicate detection](/advanced/duplicate-detection/) for the optional self-report recipe.
+- **Prefer `project/capability` identifier paths when several areas share a channel.** The `project` segment namespaces them so they never collide (duplicate-identifier, error 13); a private single-owner channel can use flat names.
+
+## 4. Do / Don't
+
+| Do | Don't |
+|----|-------|
+| Build one `registry()` per test, holding only the layers under test | Call mycl "DI" or a dependency-injection framework (it is a capability/registry system) |
+| Compose whole registries by passing several to `mycl`/`scope` (later wins per capability; augments accumulate) | Mutate or monkey-patch a resolved function (rebind through a registry instead) |
+| `import * as introspect from '@mycl/core/introspect'`; use `introspect.explain(reg, cap)` (and `introspect.describe(reg)`) to debug "why isn't my override taking" | Catch mycl errors by message text (match the numeric code). Prod messages are only `mycl: error <code>, visit https://mycl.dev/errors/<code> for more information.` |
+| Reach for the main entry (`createFnChannel` and friends) first | Reach for `/factory`, `/context`, or `/introspect` when the main entry suffices (those subpaths are for kernel/connector authors) |
+
+## 5. Extending a mycl project
+
+Real API only. Every capability below is imported as a *value*, not referenced by identifier string.
+
+### 5.1 Add a capability
+
+Define it, export it from `./capabilities`, layer a default where you compose.
+
+```ts
+// capabilities.ts: surfaced via the "./capabilities" package export
+import { createFnChannel } from '@mycl/core';
+
+const { capable } = createFnChannel('my-app-or-library');
+
+export const fetchUser = capable(
+  async (id: string) => ({ id, name: 'base' }), // base impl = the default
+  'fetchUser',                                  // identifier path (mandatory)
+);
+```
+
+### 5.2 Override behavior at the composition root
+
+Bind a replacement in a registry, then activate it for a call tree with `scope`.
+
+```ts
+import { createFnChannel, registry } from '@mycl/core';
+
+const { scope } = createFnChannel('my-app-or-library');
+import { fetchUser } from './capabilities';
+
+const reg = registry().layer(fetchUser, async (id) => ({ id, name: 'override' }));
+
+scope(() => fetchUser('42'), reg)(); // dispatches the override; base untouched elsewhere
+```
+
+### 5.3 Cross-cutting concerns via `.augment` + helpers
+
+Augments wrap the resolved callable without replacing it: logging, timing, error recovery. Compose several; they stack outer-wraps-inner.
+
+```ts
+import { registry } from '@mycl/core';
+import { after, handleError } from '@mycl/core/helpers';
+import { fetchUser } from './capabilities';
+
+const observed = registry()
+  .augment(fetchUser, after((u) => console.log('fetched', u)))
+  .augment(fetchUser, handleError((err) => { report(err); return { id: 'unknown', name: 'anonymous' }; }));
+```
+
+> `after` / `pipe` observe the capability's **raw** result. For an async capability that is the Promise, not the settled value. `await` inside your callback if you need the resolved value.
+
+### 5.4 Hand-rolled layer strategy (~5 lines)
+
+No strategy library exists. A strategy is a left fold over the capability's layers: `step` is the fold function, `seed` the optional initial accumulator, `extract` the final projection into a callable. Write the fold your capability needs, inline. Here every layer *accumulates* instead of the default last-wins:
+
+```ts
+import { createFnChannel } from '@mycl/core';
+
+const { capable } = createFnChannel('my-app-or-library');
+
+const middleware = capable(() => [] as Mw[], 'middleware', {
+  strategy: {
+    // acc is the array folded so far (undefined on the first layer, §2)
+    step: (acc: Mw[] | undefined) => (m: Mw) => [...(acc ?? []), m],
+    extract: (all: Mw[]) => () => all, // extract must return a function
+  },
+});
+```
+
+## 6. Drop this into your project's AGENTS.md
+
+Copy the block below into a consumer project (e.g. a library built on mycl) and fill the placeholder line. It is self-contained and useful verbatim.
+
+```md
+## This project uses mycl
+
+mycl is a capability/registry system (NOT dependency injection). A capability is a
+function whose behavior the caller re-binds per scope without touching the call site.
+Package `@mycl/core`, main entry = everyday API; `/factory`, `/context`, `/introspect`
+subpaths = substrate for kernel/connector authors.
+
+Invariants (never violate):
+- Registries are immutable: `.layer()` / `.augment()` return a NEW registry. Keep it.
+- Capability identifier path is mandatory and non-empty (convention: project/capability when several packages share a channel, flat otherwise), stable once published.
+- Error codes are stable and never renumbered: match the code, never the message
+  (prod message is only `mycl: error <code>, visit https://mycl.dev/errors/<code>`).
+- Scope is synchronous: anything past an await / .then / timer needs `snapshot`.
+- Layer strategies own the `undefined`-parent (no-prior-value) case.
+- Augments compose first-added innermost, last-added outermost.
+- No strategy library exists on purpose: hand-roll strategies (a plain object, ~5 lines).
+- `requires(...)` is compile-time only, enforced at `mycl(...)`; zero runtime effect.
+
+Conventions:
+- Import capabilities as VALUES from the `./capabilities` export, never identifier strings.
+- Take `@mycl/core` as a regular or peer dependency (regular for the simplest install, peer to share one copy across libraries) and mint a private channel per package.
+- One `registry()` per test, holding only the layers under test.
+- Debug overrides with `import * as introspect from '@mycl/core/introspect'` →
+  `introspect.explain(reg, cap)`.
+
+<!-- where capabilities live in THIS project: ... -->
+
+Full machine-readable docs: https://mycl.dev/llms-full.txt
+```
+
+## Where next
+
+- [llms.txt](https://mycl.dev/llms.txt): the doc index for agents.
+- [llms-full.txt](https://mycl.dev/llms-full.txt): every doc page as one text file.
+- [`@mycl/core` reference](/reference/core/): every function and type, with signatures and error codes.
+- [Glossary](/reference/glossary/): each term defined once.
+
+---
+

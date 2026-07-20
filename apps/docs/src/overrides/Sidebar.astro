@@ -1,0 +1,81 @@
+---
+// Sidebar override: Starlight's default sidebar with a footer row that carries the
+// docs-sidebar collapse toggle at its bottom-left. The default is imported by its
+// concrete path because the `virtual:starlight/components/Sidebar` specifier would
+// resolve back to this override and recurse. The row is rendered AFTER <Default /> so
+// it is the last child of the sidebar's flex column, then dropped to the bottom.
+//
+// The toggle carries data-sidebar-toggle and shares the one delegated click handler
+// defined in the SocialIcons override (rendered on every page). It is styled
+// identically to the recipe file-tree toggle (.rcp-tree-toggle in custom.css): same
+// 18x18 panel glyph, same padding, same hover, at its menu's bottom-left. Desktop only
+// (md+ = >=50rem), matching where the collapse applies. When the sidebar is collapsed
+// this row hides with the rest of the sidebar pane; a thin rail (SocialIcons) expands
+// it again.
+import Default from '@astrojs/starlight/components/Sidebar.astro';
+---
+
+<Default />
+
+<div class="sidebar-collapse-row sl-hidden md:sl-flex">
+  <button
+    type="button"
+    class="sidebar-collapse"
+    data-sidebar-toggle
+    aria-pressed="false"
+    aria-label="Collapse sidebar"
+    title="Collapse sidebar"
+  >
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+      <line x1="9.5" y1="4" x2="9.5" y2="20"></line>
+    </svg>
+  </button>
+</div>
+
+<style>
+  @layer starlight.core {
+    /* Footer row: pins the collapse toggle to the sidebar's bottom-left. The sidebar
+       content is a full-height flex column, so margin-block-start:auto drops this row
+       to the bottom, below all nav groups and a hairline. Display comes from the
+       md:sl-flex utility (flex at >=50rem, hidden below), so this only sets placement. */
+    .sidebar-collapse-row {
+      margin-block-start: auto;
+      /* Break out of the sidebar content's 1rem padding so the rule spans edge to
+         edge like the IDE's dividers; padding-inline re-insets the toggle. */
+      margin-inline: -1rem;
+      padding-block-start: 0.5rem;
+      padding-inline: 1rem;
+      justify-content: flex-start;
+      align-items: center;
+      border-top: 1px solid var(--sl-color-hairline);
+    }
+    /* Identical to the recipe file-tree toggle (.rcp-tree-toggle): 18x18 glyph,
+       0.2rem padding, transparent, accent ink, accent-low hover. */
+    .sidebar-collapse {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      background: transparent;
+      cursor: pointer;
+      padding: 0.2rem;
+      /* Pull the glyph out to 0.5rem from the sidebar edge (the content has 1rem
+         padding), so it lines up with the collapsed rail's toggle and the collapse
+         leaves it exactly in place. The footer divider (on the row) stays put. */
+      margin-inline-start: -0.5rem;
+      border-radius: 0.25rem;
+      color: var(--sl-color-text-accent);
+    }
+    .sidebar-collapse svg {
+      flex: none;
+      width: 18px;
+      height: 18px;
+    }
+    .sidebar-collapse:hover,
+    .sidebar-collapse:focus-visible {
+      background: var(--sl-color-accent-low);
+    }
+  }
+</style>

@@ -1,0 +1,78 @@
+---
+title: Capabilities
+description: A capability is one function that is three things at once, a callable default, a typed contract, and a registry key.
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import capabilitiesDefine from '../../../examples/capabilities-define.ts?raw';
+import capabilitiesCompose from '../../../examples/capabilities-compose.ts?raw';
+
+A **capability** is an ordinary function you wrap with `capable()`. That one
+function is three things at once: a callable default you can run today, a typed
+contract others bind against, and its own registry key. Reach for a capability
+wherever you want a function's behavior to be swappable per scope without editing
+its source or its call sites.
+
+<Playground client:only="react" code={capabilitiesDefine} />
+
+## Three things at once
+
+The wrapped `greet` above is, simultaneously:
+
+- **A callable default.** Call it inside a scope and, with nothing bound, the
+  function you passed to `capable()` runs. Its call sites never change.
+- **A typed contract.** TypeScript infers the type of every binding and augment
+  from the capability's own signature: a replacement with the wrong shape is a
+  compile error, not a runtime surprise.
+- **Its own registry key.** The capability object itself is the key:
+  `registry().layer(greet, replacement)` keys on `greet`. There is no separate
+  token and no string lookup.
+
+## Identifier: the path you pass, the id you get
+
+The second argument to `capable()` is the **identifier path**, a non-empty
+string. A flat name is enough for a private, single-owner channel; use
+`'project/capability'` when several packages share one channel, so their
+capabilities never collide. mycl prepends the [channel](/reference/glossary/#channel)'s name to form
+the capability's **identifier**, its canonical id. A capability belongs to the
+channel whose `capable` minted it: with `createFnChannel('my-app-or-library')`, the identifier
+path `'greet'` becomes the identifier `my-app-or-library:greet`, the name you see in
+error messages and introspection.
+
+```ts
+capable(fn, idPath, config?)
+```
+
+Identifier rules:
+
+- **Mandatory and non-empty.** There is no anonymous capability; an empty path
+  is a type error, and in dev throws when the capability is created.
+- **Any non-empty name works.** Channels are disjoint, so uniqueness only
+  matters within your own channel. When several packages or feature areas
+  share one channel, prefix a project segment (`users/fetch`, `billing/fetch`);
+  further `/` sub-namespacing is fine.
+- **Stable once published.** The identifier is public: it is the error
+  label, the introspection label, and the type-level layer-record key. Renaming a
+  shipped capability's identifier is a breaking change, like renaming an exported
+  symbol.
+
+## Capabilities are plain functions
+
+Because a capability is just a function, you pass it, store it, and compose it
+like any other. One capability can call another, and they all dispatch through
+the same active scope.
+
+<Playground client:only="react" code={capabilitiesCompose} />
+
+## Configuring how bindings combine
+
+The optional third argument, `config`, carries a **layer strategy**: it
+controls how multiple bindings for the same capability combine (accumulate into
+a list, concatenate, and so on) instead of the default last-one-wins. Most
+capabilities never need it. See [Layer strategies](/guide/layer-strategies/).
+
+## Where next
+
+- [Scopes](/guide/scopes/): how a capability finds its implementation at call time.
+- [Registries and layers](/guide/registries-and-layers/): collect, inspect, and compose bindings.
+- [Layer strategies](/guide/layer-strategies/): combine multiple bindings for one capability.

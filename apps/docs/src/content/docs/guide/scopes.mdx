@@ -1,0 +1,66 @@
+---
+title: Scopes
+description: A capability dispatches through the active scope; scope() binds a function to one, and calling a capability with no scope throws loud.
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import scopesBind from '../../../examples/scopes-bind.ts?raw';
+import scopesOutside from '../../../examples/scopes-outside.ts?raw';
+import scopesShadow from '../../../examples/scopes-shadow.ts?raw';
+
+A **scope** is the resolved registry active on the call stack when a capability
+is called. That is the whole dispatch mechanism: there is no global registry
+and no ambient default. `scope(fn, registry?)` binds a function to a scope; when
+you call the returned function, that scope is active for the duration of the
+call.
+
+<Playground client:only="react" code={scopesBind} />
+
+## `scope(fn)` and `scope(fn, reg)`
+
+- **`scope(fn)`** with no registry binds an **empty scope**: every capability
+  called inside `fn` falls back to its default. Use it when you want the real
+  call path with no overrides.
+- **`scope(fn, reg)`** binds `reg`: capabilities inside `fn` dispatch through
+  it. `reg` may be a registry, or a precomputed resolved registry.
+
+`scope` returns a new function and resolves the registry once. The scope is not
+active until you call that function, and the function is reusable, dispatching
+through the same resolved bindings on every call.
+
+## Calling with no scope throws
+
+A capability with no scope on the stack has no table to consult and no safe
+default to assume, so it throws instead of guessing. This is deliberate: a
+silent wrong-scope dispatch (running a default you meant to override, or an
+override from an unrelated part of the call tree) is far harder to find than a
+loud failure at the call site.
+
+<Playground client:only="react" code={scopesOutside} />
+
+The error names the capability by its full identifier (`my-app-or-library:greet`), so a
+failure points to the exact capability that ran without a scope.
+
+## Functions that outlive the scope
+
+The scope is synchronous: it is active while the scoped function runs and gone
+once it returns. A callback that is stored or returned and then called _later_
+(after an `await`, in a `setTimeout`, or from a closure that escaped) runs with
+no scope and throws. Capture the scope with `snapshot()` so it replays when the
+callback later runs. See [Snapshots and async](/guide/snapshots-and-async/) for
+the full pattern.
+
+## Scopes don't inherit: each function carries its own
+
+Scopes do not nest dynamically. A function wrapped by `scope()` carries the
+scope it captured and replays it, shadowing whatever scope is active where it is
+called. So the scope a capability sees is the one captured by the nearest
+`scope()` around the code that calls it, not the caller's scope.
+
+<Playground client:only="react" code={scopesShadow} />
+
+## Where next
+
+- [Registries and layers](/guide/registries-and-layers/): build and compose the registries a scope dispatches through.
+- [Snapshots and async](/guide/snapshots-and-async/): carry a scope across async boundaries and escaping callbacks.
+- [Capabilities](/guide/capabilities/): what a scope is dispatching for.

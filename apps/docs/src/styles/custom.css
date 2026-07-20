@@ -1,0 +1,550 @@
+/* mycl brand — burgundy accent ramp over Starlight's defaults.
+   Palette: primary #8B2035, secondary #A63348, tertiary/accent #C45068, dark #1A1A1A. */
+
+:root {
+  --sl-font: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  /* Dark theme: links and highlights use the lighter tertiary so they read on near-black. */
+  --sl-color-accent-low: #3a1220;
+  --sl-color-accent: #c45068;
+  --sl-color-accent-high: #e3a5b2;
+  /* Width of a collapsed sidebar rail. Shared so the collapsed docs menu (the
+     fixed rail in SocialIcons.astro) and the collapsed recipe file tree
+     (.rcp-tree-collapsed) are exactly the same width. Fits the 18px toggle
+     glyph plus its padding. */
+  --mycl-rail: 2.75rem;
+}
+
+/* Light theme: the deep primary carries the accent; the app bar goes white. */
+:root[data-theme='light'] {
+  --sl-color-accent-low: #f2d5db;
+  --sl-color-accent: #8b2035;
+  --sl-color-accent-high: #5c1523;
+  --sl-color-bg-nav: #ffffff;
+}
+
+:root { color-scheme: dark; }
+
+/* Early-development banner (Header.astro override): a full-width bar pinned
+   above the nav row, inside the fixed header box. The bar itself is styled in
+   overrides/Header.astro; this block makes the layout leave room for it.
+   --mycl-nav-row-height mirrors Starlight's own nav heights (3.5rem, 4rem at
+   50em; style/props.css); --sl-nav-height becomes row + banner, so every
+   offset keyed off the nav height (sidebar top, content padding, scroll
+   padding, mobile TOC, the collapse rail below) adjusts on its own. The two
+   consumers that use the nav height as a SIZE rather than an offset are
+   compensated back to the row height: the logo (SiteTitle keys its height off
+   the nav height) and the mobile menu button (centered within the nav
+   strip). The header reserves the bar's strip with block-start padding so
+   the nav row sits below it. The taller mobile bar fits the notice's extra
+   lines at narrow widths. Remove together with Header.astro at a stable
+   release. */
+:root {
+  --mycl-banner-height: 3.5rem;
+  --mycl-nav-row-height: 3.5rem;
+  --sl-nav-height: calc(var(--mycl-nav-row-height) + var(--mycl-banner-height));
+}
+@media (min-width: 50em) {
+  :root {
+    --mycl-banner-height: 2.25rem;
+    --mycl-nav-row-height: 4rem;
+  }
+}
+.page > .header {
+  padding-block-start: calc(var(--sl-nav-pad-y) + var(--mycl-banner-height));
+}
+.site-title img {
+  height: calc(var(--mycl-nav-row-height) - 2 * var(--sl-nav-pad-y));
+}
+starlight-menu-button button {
+  top: calc(var(--mycl-banner-height) + (var(--mycl-nav-row-height) - var(--sl-menu-button-size)) / 2);
+}
+
+/* Front page split view: full-width hero on top, then playground left and
+   card blocks right. Scoped via the .front-demo marker so no other page is
+   affected; below the breakpoint the page stacks exactly as before. */
+@media (min-width: 72rem) {
+  main:has(.front-demo) .sl-container {
+    display: grid;
+    grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);
+    column-gap: 3.5rem;
+    align-items: start;
+  }
+
+  /* Lift the markdown wrapper out of the flow so its children (.front-demo,
+     .front-copy) become grid items themselves. */
+  main:has(.front-demo) .sl-markdown-content {
+    display: contents;
+  }
+
+  main:has(.front-demo) .hero { grid-column: 1 / -1; grid-row: 1; padding-block-end: 2rem; }
+
+  /* The mark's ink spans exactly the copy block's height: the logo viewBox is
+     cropped to the artwork, and the image takes the row height (set by the
+     copy) instead of Starlight's fixed 25rem square. */
+  main:has(.front-demo) .hero > img {
+    height: 100%;
+    width: auto;
+    max-width: 100%;
+  }
+  main:has(.front-demo) .front-copy { grid-column: 2; grid-row: 2; }
+  main:has(.front-demo) footer { grid-column: 1 / -1; }
+
+  /* The playground stretches to the row height (set by the blocks column);
+     grid display gives the island's root div a definite height to fill. */
+  main:has(.front-demo) .front-demo {
+    grid-column: 1;
+    grid-row: 2;
+    align-self: stretch;
+    display: grid;
+    min-height: 0;
+  }
+
+  /* Blocks stack in a single column and fill the row exactly, so their top and
+     bottom edges line up with the stretched playground. */
+  /* Starlight's content rhythm puts margin-top on following siblings; both
+     wrappers must sit flush so the columns' top edges align. */
+  main:has(.front-demo) .front-copy { align-self: stretch; margin: 0; }
+  main:has(.front-demo) .front-demo { margin: 0; }
+  main:has(.front-demo) .front-copy .card-grid {
+    grid-template-columns: 1fr;
+    grid-auto-rows: 1fr;
+    height: 100%;
+    margin: 0;
+  }
+  main:has(.front-demo) .front-copy .card { margin: 0; }
+
+  /* Blocks share the playground's border treatment. */
+  main:has(.front-demo) .front-copy .card {
+    border-radius: 0.5rem;
+  }
+
+  /* The outro line spans both columns, centered. */
+  main:has(.front-demo) .front-outro {
+    grid-column: 1 / -1;
+    text-align: center;
+  }
+}
+
+/* ── Recipes: full-bleed, full-height IDE view inside the docs shell ──────────
+   The recipe page keeps Starlight's header + left sidebar; only the content
+   column is widened and given the exact height below the header. All rules are
+   scoped behind .recipe-full so no other page is ever affected. */
+
+/* Recipe pages lock to the viewport: <main> becomes a flex column exactly the
+   height below the fixed header, so the page itself never scrolls (only the panes
+   inside the IDE do). The real Starlight page <h1> renders normally at the top in
+   its own content panel, with its unchanged PageTitle styling and column position,
+   so the title never jumps when navigating to or from a recipe. The IDE fills the
+   rest. */
+main:has(.recipe-full) {
+  display: flex;
+  flex-direction: column;
+  height: calc(100dvh - var(--sl-nav-height));
+  min-height: 34rem;
+  /* Bottom margin below the IDE, equal to the title panel's block padding (1.5rem),
+     so the recipe sits symmetrically: title, its bottom margin, the under-title rule,
+     the IDE, the under-console rule, and the same bottom margin to the viewport edge. */
+  padding: 0 0 1.5rem;
+  overflow: hidden;
+  /* Content-area width as if the sidebar were ALWAYS expanded. The title indent and
+     IDE margins below are computed from this instead of from the live column width
+     (100%), so collapsing the sidebar does not change them: the freed column simply
+     widens the content-area from the left while the title-to-sidebar gap and the
+     right margin stay put. Only meaningful at >=72rem, where those margins exist. */
+  --rcp-frame: calc(100vw - var(--sl-sidebar-width));
+}
+main:has(.recipe-full) footer { display: none; }
+
+/* Title panel: natural height; keep Starlight's own padding and content column so
+   the <h1> sits exactly where every other page's title does (identical element,
+   identical styling, no jump). */
+main:has(.recipe-full) .content-panel:not(:has(.recipe-full)) {
+  flex: 0 0 auto;
+  border: 0;
+}
+/* Reserve the (empty) table-of-contents gutter for the title panel only, so the
+   <h1> lands in the EXACT column every table-of-contents page uses (no jump on
+   navigation). These are the values Starlight's TwoColumnContent puts on .main-pane
+   for a [data-has-toc] page; the body panel below stays full-bleed. Uses --rcp-frame
+   (the expanded-sidebar content-area) rather than 100%, so the indent is identical
+   whether the sidebar is open or collapsed. */
+@media (min-width: 72rem) {
+  main:has(.recipe-full) .content-panel:not(:has(.recipe-full)) {
+    width: calc(
+      var(--sl-content-width) + (var(--rcp-frame) - var(--sl-content-width) - var(--sl-sidebar-width)) / 2
+    );
+    --sl-content-margin-inline: auto 0;
+  }
+}
+
+/* Body panel: fills the remaining height and goes full-bleed for the IDE. The
+   height passes down the wrapper chain (each a flex passthrough) so the IDE can be
+   100% tall. */
+main:has(.recipe-full) .content-panel:has(.recipe-full) {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+  padding: 0;
+  /* Full-width rules bracketing the IDE: the top one is exactly what Starlight draws
+     between any two content panels (under the page title); the bottom one mirrors it
+     under the console. The bottom margin below it comes from main's padding. */
+  border-top: 1px solid var(--sl-color-hairline);
+  border-bottom: 1px solid var(--sl-color-hairline);
+}
+main:has(.recipe-full) .content-panel:has(.recipe-full) .sl-container {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+  max-width: none;
+  margin-inline: 0;
+}
+main:has(.recipe-full) .content-panel:has(.recipe-full) .sl-markdown-content {
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 0;
+}
+main:has(.recipe-full) .rcp-shell { margin: 0; }
+main:has(.recipe-full) .recipe-full {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: grid;
+}
+
+/* Give the IDE symmetric left+right margins so its LEFT edge aligns with the title's
+   table-of-contents column (the recipe reads as one coherent unit). The offset is the
+   exact indent the title gets from the reserved TOC gutter above: (content-area minus
+   the content + sidebar columns, halved) less the content padding. Computed from
+   --rcp-frame (the expanded-sidebar content-area), so the title-to-sidebar gap and the
+   right margin are STATIC across the sidebar collapse: collapsing widens the IDE from
+   the left (the left edge tracks the sidebar at a fixed gap) while its right edge and
+   right margin stay fixed. Both title and IDE use the same math, so they stay aligned
+   in every state. */
+@media (min-width: 72rem) {
+  main:has(.recipe-full) .content-panel:has(.recipe-full) {
+    padding-inline: calc(
+      (var(--rcp-frame) - var(--sl-content-width) - var(--sl-sidebar-width)) / 2 - var(--sl-content-pad-x)
+    );
+  }
+}
+
+/* Lock the whole page to the viewport while a recipe is mounted (RecipeApp adds
+   .recipe-locked to <html> on mount, removes it on unmount): the page never
+   scrolls, so only the individual panes below scroll their own content.
+   Starlight's header and left sidebar are position:fixed and the sidebar keeps
+   its own overflow-y:auto, so locking body scroll never traps the docs nav. */
+html.recipe-locked,
+html.recipe-locked body {
+  height: 100%;
+  overflow: hidden;
+}
+
+/* Desktop docs-sidebar collapse, persisted to localStorage and applied before paint
+   (no flash). Site-wide: one attribute on <html>. When collapsed the full sidebar
+   pane is hidden and a narrow fixed rail (in the SocialIcons override) takes its
+   place, exactly --mycl-rail wide so it matches the collapsed recipe file tree.
+   --sl-content-inline-start (the left padding on .main-frame) shrinks from the full
+   sidebar width to the rail width, so the content reflows left to sit just past the
+   rail and reclaims the vacated column. */
+@media (min-width: 50rem) {
+  :root[data-sidebar-collapsed] #starlight__sidebar { display: none; }
+  :root[data-sidebar-collapsed] { --sl-content-inline-start: var(--mycl-rail); }
+}
+
+/* ── Recipe IDE chrome ────────────────────────────────────────────────────────
+   Four regions, four distinct Starlight surfaces separated by gray-5 hairlines
+   so they never blur together:
+     top bar   → --sl-color-bg           (the page background)
+     file tree → --sl-color-bg-sidebar   (the docs sidebar surface)
+     editor    → Monaco's own theme background
+     console   → --sl-color-bg-inline-code body under a --sl-color-bg-sidebar head
+   Burgundy accent appears ONLY on: the active file, the Play button, prev/next
+   links, the resizer on hover/drag, and focus rings. */
+
+/* Recipe surface system. Deliberately NOT --sl-color-bg-sidebar (that is the docs
+   sidebar's own surface, so the recipe tree would merge with it). Two surfaces plus
+   a hairline, stepped so every adjacent region differs:
+     --rcp-chrome : the elevated file/tool panels (tree, console head, resizer).
+     --rcp-panel  : the base the title and output sit on (top bar, console body),
+                    where the site's own page background lives.
+     --rcp-line   : the hairline between regions.
+   Dark: panel=bg(10%) < line=gray-6(16%) < chrome=gray-5(23%). Light: panel=gray-7,
+   chrome=gray-6, line=gray-5 (a strong 77% rule that carries separation when the
+   surfaces are all near-white). */
+.rcp-shell {
+  --rcp-chrome: var(--sl-color-gray-5);
+  --rcp-panel: var(--sl-color-bg);
+  --rcp-line: var(--sl-color-gray-6);
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+  background: var(--rcp-panel);
+  overflow: hidden;
+  font-family: var(--sl-font);
+  /* Dividers on the IDE's left AND right edges (the under-title rule above is drawn
+     on the content panel), framing the symmetric margins. */
+  border-inline: 1px solid var(--sl-color-hairline);
+}
+:root[data-theme='light'] .rcp-shell {
+  --rcp-chrome: var(--sl-color-gray-6);
+  --rcp-panel: var(--sl-color-gray-7);
+  --rcp-line: var(--sl-color-gray-5);
+}
+
+/* Row that holds the file tree + editor; flexes to fill the space the console
+   leaves and clips so the editor scrolls itself. */
+.rcp-split {
+  flex: 1 1 auto;
+  min-height: 0;
+  display: flex;
+}
+.rcp-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+}
+
+/* Top bar: the page background with a bottom hairline; the title reads as a
+   left-aligned page heading, prev/next are compact accent links on the right. */
+/* Slim bar holding only the prev/next recipe pagers. The recipe title is the real
+   Starlight page <h1> above the IDE, so it is not repeated here; RecipeNav renders
+   nothing at all when a recipe has no neighbors. */
+.rcp-nav {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 1.25rem;
+  padding: 0.4rem 1rem;
+  background: var(--rcp-panel);
+  border-bottom: 1px solid var(--rcp-line);
+}
+.rcp-nav-pagers {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  gap: 1.25rem;
+}
+/* Prev/next: accent links like Starlight's pager. */
+.rcp-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  max-width: 15rem;
+  color: var(--sl-color-text-accent);
+  font-size: var(--sl-text-sm);
+  text-decoration: none;
+  white-space: nowrap;
+}
+.rcp-pager-title { overflow: hidden; text-overflow: ellipsis; }
+.rcp-pager:hover { color: var(--sl-color-white); }
+
+/* File tree: the docs sidebar surface with a clear right border; rows mirror
+   SidebarSublist (muted resting, white hover). */
+.rcp-tree {
+  width: 15rem;
+  flex: 0 0 15rem;
+  display: flex;
+  flex-direction: column;
+  padding: 0.5rem;
+  background: var(--rcp-chrome);
+  border-inline-end: 1px solid var(--rcp-line);
+}
+/* Collapsed file tree: a narrow rail exactly --mycl-rail wide (matching the
+   collapsed docs menu), with the toggle at its bottom-left. flex-direction is set
+   explicitly to row (it would otherwise inherit column from .rcp-tree, flipping the
+   axes), so justify-content:flex-start = left and align-items:flex-end = bottom. */
+.rcp-tree-collapsed {
+  width: var(--mycl-rail);
+  flex: 0 0 var(--mycl-rail);
+  padding: 0.5rem;
+  display: flex;
+  flex-direction: row;
+  justify-content: flex-start;
+  align-items: flex-end;
+}
+/* Caption row at the top-left (the toggle now lives in the footer below). */
+.rcp-tree-head {
+  flex: 0 0 auto;
+  padding: 0 0 0.4rem;
+}
+/* File list: scrolls on its own so the caption above and the footer toggle below
+   stay pinned. */
+.rcp-tree-nodes {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+}
+/* Toggle pinned to the bottom-left of the tree, no divider above it (the compact
+   file tree drops the footer rule; the docs sidebar keeps its own). */
+.rcp-tree-foot {
+  flex: 0 0 auto;
+  display: flex;
+  justify-content: flex-start;
+}
+
+/* Small section caption in Starlight's sidebar-heading spirit. */
+.rcp-caption {
+  font-size: var(--sl-text-xs);
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--sl-color-gray-3);
+  user-select: none;
+}
+
+/* File rows: SidebarSublist link styling (muted resting, white hover). */
+.rcp-file {
+  display: block;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  text-align: left;
+  cursor: pointer;
+  border-radius: 0.25rem;
+  padding: 0.3em 0.5rem;
+  line-height: 1.4;
+  font-family: var(--sl-font-mono, ui-monospace, monospace);
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-2);
+}
+.rcp-file:hover,
+.rcp-file:focus-visible {
+  color: var(--sl-color-white);
+}
+/* Active file: accent text over a subtle accent surface with a left accent bar,
+   echoing the current-page nav link on-brand (not a flat filled block). */
+.rcp-file-active,
+.rcp-file-active:hover {
+  color: var(--sl-color-text-accent);
+  background: var(--sl-color-accent-low);
+  font-weight: 600;
+  box-shadow: inset 0.1875rem 0 0 var(--sl-color-accent);
+}
+/* Folder rows: muted labels. */
+.rcp-folder {
+  padding: 0.3em 0.5rem;
+  line-height: 1.4;
+  font-family: var(--sl-font-mono, ui-monospace, monospace);
+  font-size: var(--sl-text-sm);
+  color: var(--sl-color-gray-3);
+  user-select: none;
+}
+
+/* Tree collapse control: the shared panel-toggle icon, identical to the docs
+   sidebar's collapse toggle (same 18x18 icon, same bottom-left placement, same hover). */
+.rcp-tree-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 0;
+  background: transparent;
+  cursor: pointer;
+  padding: 0.2rem;
+  border-radius: 0.25rem;
+  color: var(--sl-color-text-accent);
+}
+.rcp-tree-toggle svg { flex: none; width: 18px; height: 18px; }
+.rcp-tree-toggle:hover { background: var(--sl-color-accent-low); }
+
+/* Resize handle between the code area and the console: subtle at rest, accent on
+   hover/drag, with a short centered grip so it reads as draggable. */
+.rcp-resizer {
+  flex: 0 0 auto;
+  position: relative;
+  height: 7px;
+  cursor: row-resize;
+  background: var(--rcp-chrome);
+  border-top: 1px solid var(--rcp-line);
+  border-bottom: 1px solid var(--rcp-line);
+  touch-action: none;
+}
+.rcp-resizer::after {
+  content: '';
+  position: absolute;
+  inset-inline-start: 50%;
+  inset-block-start: 50%;
+  width: 2.25rem;
+  height: 2px;
+  transform: translate(-50%, -50%);
+  border-radius: 1px;
+  background: var(--sl-color-gray-4);
+}
+.rcp-resizer:hover,
+.rcp-dragging .rcp-resizer {
+  background: var(--sl-color-accent-low);
+  border-color: var(--sl-color-accent);
+}
+.rcp-resizer:hover::after,
+.rcp-dragging .rcp-resizer::after {
+  background: var(--sl-color-accent);
+}
+/* While dragging: kill selection and stop the editor/iframe from eating moves. */
+.rcp-dragging { cursor: row-resize; user-select: none; }
+.rcp-dragging .rcp-editor,
+.rcp-dragging iframe { pointer-events: none; }
+
+/* Console: a code-block-like body under an elevated header row. Height is set on
+   the element by RecipeApp (drag-resizable); the body scrolls itself. */
+.rcp-console {
+  flex: 0 0 auto;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+}
+.rcp-console-head {
+  flex: 0 0 auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0.35rem 0.5rem 0.35rem 0.75rem;
+  background: var(--rcp-chrome);
+  border-bottom: 1px solid var(--rcp-line);
+}
+.rcp-console-body { flex: 1 1 auto; min-height: 0; }
+.rcp-console-out {
+  height: 100%;
+  overflow-y: auto;
+  padding: 0.75rem;
+  background: var(--rcp-panel);
+  color: var(--sl-color-text);
+  font-family: var(--sl-font-mono, ui-monospace, monospace);
+  font-size: var(--sl-text-xs);
+  line-height: 1.5;
+}
+.rcp-console-empty { color: var(--sl-color-gray-3); }
+.rcp-log { white-space: pre-wrap; }
+.rcp-log-error { color: var(--sl-color-red-high); }
+.rcp-log-warn { color: var(--sl-color-orange-high); }
+
+/* Actions: Play primary (the site's accent button), Reset secondary (outline). */
+.rcp-actions { display: flex; gap: 0.5rem; }
+.rcp-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.3rem;
+  cursor: pointer;
+  border: 1px solid transparent;
+  border-radius: 0.5rem;
+  padding: 0.25rem 0.75rem;
+  font-family: var(--sl-font);
+  font-size: var(--sl-text-xs);
+  font-weight: 500;
+  line-height: 1.4;
+}
+.rcp-btn-primary {
+  background: var(--sl-color-text-accent);
+  border-color: var(--sl-color-text-accent);
+  color: var(--sl-color-black);
+}
+.rcp-btn-primary:hover { filter: brightness(1.08); }
+.rcp-btn-secondary {
+  background: transparent;
+  border-color: var(--sl-color-gray-5);
+  color: var(--sl-color-text);
+}
+.rcp-btn-secondary:hover {
+  background: var(--sl-color-gray-6);
+  border-color: var(--sl-color-gray-4);
+  color: var(--sl-color-white);
+}

@@ -1,0 +1,11 @@
+dist/
+.astro/
+node_modules/
+src/playground/vendor/
+src/content/docs/errors/
+src/content/docs/recipes/
+src/content/docs/reference/changelog.md
+dev/null
+dev/
+scripts/.examples-tmp/
+src/generated/

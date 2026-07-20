@@ -1,0 +1,44 @@
+---
+// Wraps Starlight's Header to pin the site-wide early-development notice as a
+// full-width bar above the nav row. It must live HERE, inside the fixed
+// .page > .header box, not in the Banner slot: Banner renders inside <main>,
+// which TwoColumnContent isolates (isolation: isolate), so a fixed bar there
+// stacks below the header no matter its z-index. The bar positions absolutely
+// against the fixed header box; the layout room for it is made in custom.css
+// (--sl-nav-height grows by --mycl-banner-height, and the header's block-start
+// padding reserves the strip). Remove this file, the Header override in
+// astro.config.mjs, and the banner block in custom.css once mycl reaches a
+// stable release.
+import Default from '@astrojs/starlight/components/Header.astro';
+---
+
+<div class="dev-banner print:hidden" data-pagefind-ignore>
+  mycl is in early development. The API may change before a stable release; it is not
+  yet recommended for production use.
+</div>
+<Default />
+
+<style>
+  .dev-banner {
+    position: absolute;
+    inset-block-start: 0;
+    inset-inline: 0;
+    height: var(--mycl-banner-height);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding-inline: var(--sl-nav-pad-x);
+    background-color: var(--sl-color-orange-low);
+    color: var(--sl-color-orange-high);
+    line-height: var(--sl-line-height-headings);
+    text-align: center;
+    text-wrap: balance;
+    font-size: var(--sl-text-xs);
+  }
+
+  @media (min-width: 50em) {
+    .dev-banner {
+      font-size: var(--sl-text-sm);
+    }
+  }
+</style>

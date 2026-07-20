@@ -1,0 +1,100 @@
+---
+// Header override: Starlight's built-in social icons, plus the collapsed-sidebar rail
+// and the one shared collapse handler + persistence. The default is imported by its
+// concrete path because the `virtual:starlight/components/SocialIcons` specifier would
+// resolve back to this override and recurse.
+//
+// The rail is a narrow, full-height fixed strip shown ONLY when the sidebar is
+// collapsed: exactly --mycl-rail wide (the same width as the collapsed recipe file
+// tree), on the sidebar surface, with the toggle at its bottom-left. Clicking the toggle
+// expands the sidebar again. It lives in the header (not the sidebar) precisely so it
+// survives the `#starlight__sidebar { display:none }` collapse. The collapse control
+// shown when the sidebar is OPEN lives in the Sidebar override's header row. Both carry
+// data-sidebar-toggle and share the one delegated handler defined below (rendered on
+// every page). Desktop only (>=50rem), matching where the collapse applies.
+import Default from '@astrojs/starlight/components/SocialIcons.astro';
+---
+
+<Default><slot /></Default>
+
+<div class="sidebar-rail">
+  <button
+    type="button"
+    class="rcp-tree-toggle"
+    data-sidebar-toggle
+    aria-pressed="true"
+    aria-label="Expand sidebar"
+    title="Expand sidebar"
+  >
+    <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor"
+      stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">
+      <rect x="3" y="4" width="18" height="16" rx="2"></rect>
+      <line x1="9.5" y1="4" x2="9.5" y2="20"></line>
+    </svg>
+  </button>
+</div>
+
+<script>
+  const KEY = 'mycl:sidebar-collapsed';
+
+  function syncPressed() {
+    const collapsed = document.documentElement.hasAttribute('data-sidebar-collapsed');
+    document.querySelectorAll('[data-sidebar-toggle]').forEach((el) =>
+      el.setAttribute('aria-pressed', String(collapsed)));
+  }
+
+  // Wire once per page load. Event delegation means every [data-sidebar-toggle]
+  // control is handled here, regardless of render order.
+  const w = window as unknown as { __myclSidebarWired?: boolean };
+  if (!w.__myclSidebarWired) {
+    w.__myclSidebarWired = true;
+    document.addEventListener('click', (e) => {
+      const target = e.target as HTMLElement | null;
+      if (!target?.closest('[data-sidebar-toggle]')) return;
+      const collapsed = document.documentElement.toggleAttribute('data-sidebar-collapsed');
+      try {
+        if (collapsed) localStorage.setItem(KEY, '1');
+        else localStorage.removeItem(KEY);
+      } catch {
+        /* private mode / storage disabled: toggle still works for the session. */
+      }
+      syncPressed();
+    });
+  }
+  syncPressed();
+</script>
+
+<style>
+  @layer starlight.core {
+    /* Hidden by default and on mobile (the collapse is a desktop feature). On desktop
+       the rail is a narrow fixed strip shown ONLY when the sidebar is collapsed. It is
+       exactly --mycl-rail wide, on the sidebar surface with a right hairline, so it
+       reads as the docs sidebar collapsed down to the same rail as the recipe file
+       tree. The toggle inside reuses the global .rcp-tree-toggle style, so both
+       collapsed toggles are pixel-identical. */
+    .sidebar-rail {
+      display: none;
+    }
+    @media (min-width: 50rem) {
+      .sidebar-rail {
+        position: fixed;
+        inset-block: var(--sl-nav-height) 0;
+        inset-inline-start: 0;
+        z-index: var(--sl-z-index-navbar);
+        width: var(--mycl-rail);
+        /* Bottom padding is 1rem (not 0.5rem) so the rail toggle lands at the same
+           height as the expanded sidebar's toggle, which sits ~1rem off the bottom;
+           the collapse then never nudges the control. */
+        padding: 0.5rem 0.5rem 1rem;
+        background: var(--sl-color-bg-sidebar);
+        border-inline-end: 1px solid var(--sl-color-hairline);
+      }
+      /* Toggle at the bottom-left, matching .rcp-tree-collapsed. */
+      :root[data-sidebar-collapsed] .sidebar-rail {
+        display: flex;
+        justify-content: flex-start;
+        align-items: flex-end;
+      }
+    }
+  }
+</style>

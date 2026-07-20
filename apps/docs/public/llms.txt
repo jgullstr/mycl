@@ -1,0 +1,39 @@
+# mycl
+
+> connect your code — a capability/registry system for TypeScript.
+> Errors resolve at https://mycl.dev/errors/<code>. Full docs text: https://mycl.dev/llms-full.txt
+
+## Getting Started
+
+- [Introduction](https://mycl.dev/getting-started/introduction/): What mycl is, what it is not, and who reaches for it.
+- [Installation](https://mycl.dev/getting-started/installation/): Install mycl in an app or a library, mint your channel, and set up the ./capabilities convention.
+- [Quick Start](https://mycl.dev/getting-started/quick-start/): Mint a channel, define a capability, override it per scope, and hand out instances from a factory, all in about a minute.
+
+## Guide
+
+- [Channels](https://mycl.dev/guide/channels/): A channel is a private capability namespace with its own scope context: mint one kernel per app or library, and nothing outside it can see in.
+- [Capabilities](https://mycl.dev/guide/capabilities/): A capability is one function that is three things at once, a callable default, a typed contract, and a registry key.
+- [Scopes](https://mycl.dev/guide/scopes/): A capability dispatches through the active scope; scope() binds a function to one, and calling a capability with no scope throws loud.
+- [Registries & Layers](https://mycl.dev/guide/registries-and-layers/): A registry is an immutable collection of bindings: layer to add them, compose by passing several, and swap I/O in tests without a mock library.
+- [Factories](https://mycl.dev/guide/factories/): mycl(make, ...registries) returns a frozen factory: registries resolve once at creation, the builder runs per call and its result comes back verbatim.
+- [Augmentation](https://mycl.dev/guide/augmentation/): .augment(cap, wrapper) composes around whatever a capability resolves to, so you can observe, transform, or recover from it without replacing the implementation.
+- [Layer Strategies](https://mycl.dev/guide/layer-strategies/): Attach a LayerStrategy to a capability: a left fold over its layers (accumulate a list, concatenate strings) instead of the default last-binding-wins.
+- [Snapshots & Async](https://mycl.dev/guide/snapshots-and-async/): A scope lives on the synchronous stack, so async callbacks escape it, and snapshot(fn) pins the active scope into a function you can call later while, on Node, alsContext does it automatically.
+
+## Advanced
+
+- [The Core Substrate](https://mycl.dev/advanced/core-substrate/): Why @mycl/core splits into a main entry (the everyday kernel) and substrate subpaths (/helpers, /context, /factory, /introspect), and how to read a registry at runtime.
+- [Building a Kernel](https://mycl.dev/advanced/building-a-kernel/): Write a connector (a fresh context plus a kernel builder), stand a channel up with createChannel(name, connector), and swap the context later with setChannelContext (AsyncLocalStorage).
+- [Type Guarantees](https://mycl.dev/advanced/type-guarantees/): How mycl's types enforce contracts at the layer boundary: the Capability discriminant, AnyCapability, requires provider-completeness, and reading a registry's type-level layers.
+- [Duplicate Detection](https://mycl.dev/advanced/duplicate-detection/): Why duplicate copies coexist harmlessly by construction, the one real hazard (cross-copy token mixing), the duplicate-identifier guard (error 13), and a self-report recipe for libraries that want startup detection.
+- [Prior Art](https://mycl.dev/advanced/concepts/): The established ideas mycl draws on (effects and handlers, the expression problem, microkernels, information hiding, and aspects), each mapped to the part of mycl it informs.
+
+## Reference
+
+- [@mycl/core](https://mycl.dev/reference/core/): Complete API reference for @mycl/core, covering every exported function and type across its five entry points, with signatures, error codes, and minimal examples.
+- [Glossary](https://mycl.dev/reference/glossary/): Every mycl term, defined once.
+- [Changelog](https://mycl.dev/reference/changelog/): Release history for @mycl/core, one section per published version.
+
+## For Agents
+
+- [Using mycl (for agents)](https://mycl.dev/agents/using-mycl/): Terse operating manual for AI agents reading, writing, and extending mycl code, covering invariants, conventions, recipes, and a drop-in AGENTS.md block.

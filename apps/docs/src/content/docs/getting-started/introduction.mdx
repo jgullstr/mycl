@@ -1,0 +1,49 @@
+---
+title: Introduction
+description: What mycl is, what it is not, and who reaches for it.
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import introTax from '../../../examples/intro-tax.ts?raw';
+
+mycl lets you modify a TypeScript function's behavior without touching its declaration or
+its call sites. A **capability** is a wrapped function whose behavior a caller can re-bind per
+**scope**: swapping, wrapping or layering functionality transparently to the call site. Once
+declared, a capability becomes its own registry key, type contract and default implementation.
+
+When you call a capability, it dispatches through its active scope and resolves its own binding
+there. The scope's **registries** compose when you activate them through a `mycl()`
+factory call, bound to a private **channel** that encapsulates your capabilities.
+
+<Playground client:only="react" code={introTax} />
+
+## What mycl is not
+
+**Not a DI container.** DI containers wire a graph of objects at startup and hand you instances
+by type or token. mycl binds behavior to a scope on the call stack; there is no container, no
+lifetime, and no construction graph. You re-bind functions, not assemble services.
+
+**Not an effect system.** It does not track effects in the type system, thread a runtime, or ask
+you to restructure programs around a monad. A capability is a plain function; calling it looks
+like calling any function.
+
+**Not monkey-patching.** Monkey-patching mutates a shared module export for the whole process.
+A registry binding is immutable, and it only applies inside the scope you activate. The same
+capability keeps its default in every other scope.
+
+## Who it's for
+
+**Library authors** who want extension points without designing a plugin API. Wrap the functions
+you want consumers to be able to change in `capable()`, and the capability surface *is* the
+extension surface: consumers write bindings instead of asking you for new config knobs.
+
+**Application developers** who need behavior that varies by context: tests that swap I/O without
+mocks, per-request flags on a server, or platform-specific implementations bound once at the
+entry point instead of branching throughout the code.
+
+## Where next
+
+- [Installation](/getting-started/installation/): add mycl and set up the `./capabilities` convention.
+- [Quick Start](/getting-started/quick-start/): 60 seconds to your first override.
+- [Capabilities](/guide/capabilities/): the full story on defining and calling them.
+- [Prior Art](/advanced/concepts/): the deeper design rationale behind the mechanism.

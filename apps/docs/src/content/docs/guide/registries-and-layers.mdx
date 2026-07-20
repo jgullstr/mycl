@@ -1,0 +1,65 @@
+---
+title: Registries & Layers
+description: "A registry is an immutable collection of bindings: layer to add them, compose by passing several, and swap I/O in tests without a mock library."
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import registriesImmutable from '../../../examples/registries-immutable.ts?raw';
+import registriesInspect from '../../../examples/registries-inspect.ts?raw';
+import registriesMerge from '../../../examples/registries-merge.ts?raw';
+import registriesTesting from '../../../examples/registries-testing.ts?raw';
+
+A **registry** is an immutable collection of capability bindings. `registry()`
+makes an empty one; `.layer()` and `.augment()` each return a **new** registry
+with the binding added: the original is never touched. You build registries up,
+then hand them to `scope()` or `mycl()`.
+
+<Playground client:only="react" code={registriesImmutable} />
+
+## A layer is one binding
+
+`.layer(capability, value)` binds a single capability: one **layer**. Because
+every call returns a fresh registry, chaining `.layer(...).layer(...)` simply
+threads each new registry into the next call. Nothing mutates, so you can branch
+off a shared base and the branches stay independent.
+
+## Inspecting a registry
+
+A registry has two read-only methods for introspection, useful in tests,
+tooling, and debugging:
+
+- **`.has(capability)`** returns whether the registry binds that capability.
+- **`.bindings()`** returns a `ReadonlyMap` of every binding, keyed by capability.
+
+<Playground client:only="react" code={registriesInspect} />
+
+## Composing registries
+
+Registries compose: pass several to `mycl()` or `scope()` and they fold into
+one **resolved registry**, the form a scope dispatches against. When two
+registries bind the same capability, the later one wins; augments accumulate
+across all of them. Don't confuse composition with `.layer()`: `.layer()` adds
+one binding to one registry, while composition combines whole registries.
+(The primitive underneath, `merge`, lives on `@mycl/core/factory` for
+[kernel authors](/advanced/building-a-kernel/); the everyday surface composes
+for you.)
+
+<Playground client:only="react" code={registriesMerge} />
+
+## Testing without mocks
+
+Immutability makes a registry the natural test seam. Keep the code under test
+exactly as it ships and bind a test registry that swaps its I/O capabilities for
+in-memory stand-ins. No mock library, no module patching: the capability
+surface is the seam.
+
+<Playground client:only="react" code={registriesTesting} />
+
+The example passes only because both swaps took: if the test registry missed
+`sendEmail`, the real default would throw. That is the seam doing its job.
+
+## Where next
+
+- [Factories](/guide/factories/): bundle registries once and build instances with `mycl()`.
+- [Layer strategies](/guide/layer-strategies/): make multiple bindings for one capability combine instead of overwrite.
+- [Scopes](/guide/scopes/): how a resolved registry becomes active at call time.

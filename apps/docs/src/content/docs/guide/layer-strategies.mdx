@@ -1,0 +1,107 @@
+---
+title: Layer Strategies
+description: "Attach a LayerStrategy to a capability: a left fold over its layers (accumulate a list, concatenate strings) instead of the default last-binding-wins."
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import strategiesLastwins from '../../../examples/strategies-lastwins.ts?raw';
+import strategiesClasses from '../../../examples/strategies-classes.ts?raw';
+
+By default, the **last** `.layer()` binding for a capability wins. Two layers for
+the same capability, and the later one replaces the earlier one whole. That is
+the right behavior for almost every capability: a replacement is a replacement.
+
+<Playground client:only="react" code={strategiesLastwins} />
+
+Sometimes you want the layers to *combine* rather than compete: a list that
+grows across layers, a set of CSS classes that concatenate, a config object that
+merges field by field. A **layer strategy** is how you say so. It travels with
+the capability, not with any registry, so every registry that layers the
+capability folds the same way.
+
+## The `LayerStrategy` shape
+
+A layer strategy is a **left fold** over the capability's layers, the shape of
+`Array.prototype.reduce`: `step` is the reducer, folding each layer's
+**contributed value** (the value one `.layer()` call feeds in) into the
+accumulated value; `seed` is the optional initial accumulator; `extract`
+projects the final accumulated value into a callable. Two functions, and one
+optional seed:
+
+```ts
+interface LayerStrategy<T, V, Args = [V]> {
+  // Fold one layer's value into the value so far.
+  step: (acc: V | undefined) => (...args: Args) => V;
+  // Project the folded value into the capability's callable.
+  extract: (value: V, base: T) => T;
+  // Optional fold seed; omit it and the first `acc` is `undefined`.
+  seed?: V;
+}
+```
+
+- **`step`** runs once per layer, in registration order. `acc` is the
+  value folded so far and arrives as `V | undefined`: on the first layer there
+  is nothing yet, so it is `undefined`. **The strategy owns that case.** You
+  decide what "no prior value" means (start fresh, seed an empty array, and so
+  on); there is no branching hidden in the resolver, and `seed` is optional.
+  The returned value becomes the next `acc`.
+- **`extract`** runs once, after the last layer. It receives the final folded
+  `value` and the capability's `base` function, and returns the callable
+  dispatch will use. `extract` **must** return a function. If it returns a
+  non-function, dispatch throws with a message naming the offending capability.
+- **`seed`** seeds the fold when you would rather not handle `undefined` in
+  `step`. It is a seed, not a trigger: with no layers, the base still runs
+  even when `seed` is set.
+
+`V` is the accumulated value type; `Args` is the tuple each `.layer()` call
+accepts. For an ordinary capability both collapse to the function itself, which
+is why the default last-wins needs no strategy at all: `step` keeps the
+newest value, `extract` returns it unchanged.
+
+## Accumulating CSS classes
+
+Here a capability's value is a class string, and each layer contributes more
+classes. `step` space-joins them in layer order; `extract` turns the
+final string into the function `buttonClass()` calls.
+
+<Playground client:only="react" code={strategiesClasses} />
+
+`theme` contributes `'bg-blue-600 text-white'`; `compact` contributes
+`'px-2 py-1'`. Neither is a replacement: the strategy folds both. With no layers
+at all, `buttonClass()` falls back to its base, `'btn'`.
+
+This is what a left fold buys: **composition is free**. Layers from composed
+registries fold as one sequence, exactly as if a single registry held them all,
+in registration order within a registry and composition order across
+registries. Two packages can contribute to the same capability without knowing
+about each other, and the result is still one deterministic fold.
+
+## You hand-roll strategies, on purpose
+
+mycl ships **no** strategy library and no `defineStrategy` helper. A layer
+strategy is a plain object with two functions; you write the one your capability
+needs, inline, in a few lines (exactly the CSS example above). That is a
+deliberate line: the substrate ships the fold *mechanism*, and the policy (how
+*your* values combine) stays in your code, where you can read it. There is
+nothing to import and no catalogue to learn.
+
+## Layer strategy vs. augment
+
+A layer strategy and an augment both let several bindings act on one capability,
+on different axes:
+
+- A **layer strategy** folds the *values* that layers contribute into one value.
+  Reach for it when a capability accumulates data: a list, a string, a merged
+  object.
+- An **augment** wraps the *callable* that resolution produces (logging, timing,
+  error recovery) without changing the value. See [Augmentation](/guide/augmentation/).
+
+A layer strategy is also unrelated to registry composition: passing several
+registries to `mycl()`/`scope()` composes whole registries, while a strategy
+folds one capability's layers within whatever registry it lands in.
+
+## Where next
+
+- [Augmentation](/guide/augmentation/): combine bindings by wrapping the call instead of folding the value.
+- [Registries and layers](/guide/registries-and-layers/): where `.layer()` collects the contributions a strategy folds.
+- [Capabilities](/guide/capabilities/): the `config` argument that carries a strategy.

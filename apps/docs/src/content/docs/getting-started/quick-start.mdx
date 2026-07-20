@@ -1,0 +1,56 @@
+---
+title: Quick Start
+description: Mint a channel, define a capability, override it per scope, and hand out instances from a factory, all in about a minute.
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import quickStartDefine from '../../../examples/quick-start-define.ts?raw';
+import quickStartOverride from '../../../examples/quick-start-override.ts?raw';
+import quickStartFactory from '../../../examples/quick-start-factory.ts?raw';
+
+Three steps to your first override. Each block below runs. Edit the code and it re-runs live.
+
+Everything in mycl happens on a [**channel**](/guide/channels/): a private namespace you mint once
+with `createFnChannel(name)`. It returns your kernel: `capable`, `snapshot`,
+`mycl`, `scope`, and the `channel` token, all bound to your channel. Your channel is yours alone;
+other mycl users in the same app dispatch through their own, without
+coordination.
+
+## 1. Define a capability
+
+`capable(fn, idPath)` wraps a function and gives it a stable **identifier**: your channel's name
+prefixed onto the **identifier path** you pass. The identifier is a label, for types, errors, and
+introspection; dispatch keys on the capability object itself, so two `capable()` calls mint two
+distinct capabilities even with the same path (the duplicate label just trips a dev warning).
+A capability always resolves through an active **scope** when you call it. App logic runs through
+a **factory** built with `mycl()`; with no registries its scope is empty, so the default
+implementation fires.
+
+<Playground client:only="react" code={quickStartDefine} />
+
+:::caution[Scope must be active]
+A capability called outside any active scope throws rather than silently misdispatching, and a
+scope does not survive an `await`. Step 3's `snapshot()` and
+[Snapshots & Async](/guide/snapshots-and-async/) cover the async story.
+:::
+
+## 2. Override it in a scope
+
+Collect bindings in a **registry**. `.layer(cap, replacement)` binds a new behavior for step 1's
+`price` capability (each block on this page is self-contained, so it re-declares what it uses).
+The call site is identical. The active scope decides which behavior runs: hand the registry to
+`mycl()` and everything inside the factory dispatches through it.
+
+<Playground client:only="react" code={quickStartOverride} />
+
+## 3. Keep the factory, hand out instances
+
+`mycl(make, ...registries)`, the function the library is named after, resolves the registries once and returns the factory as a frozen callable you can keep and reuse. Each call runs your `make` **builder** inside that resolved scope and its return value comes back verbatim. Anything `make` returns that is called *later* (after `make` finishes) must be wrapped in `snapshot()` so it replays the scope that was active while `make` ran.
+
+<Playground client:only="react" code={quickStartFactory} />
+
+## Where next
+
+- [Capabilities](/guide/capabilities/): defaults, identifiers, and calling capabilities.
+- [Registries and layers](/guide/registries-and-layers/): binding, augmenting, and composing.
+- [Factories](/guide/factories/): building instances with `mycl()`, and why `snapshot()` is needed.

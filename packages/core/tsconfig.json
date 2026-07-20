@@ -1,0 +1,15 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "rootDir": "src",
+    "outDir": "dist",
+    "paths": {
+      "@mycl/core": ["./src/index.ts"],
+      "@mycl/core/helpers": ["./src/util/helpers.ts"],
+      "@mycl/core/context": ["./src/context/index.ts"],
+      "@mycl/core/factory": ["./src/factory/index.ts"],
+      "@mycl/core/introspect": ["./src/util/introspect.ts"]
+    }
+  },
+  "include": ["src"]
+}

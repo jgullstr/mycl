@@ -1,0 +1,96 @@
+---
+title: Augmentation
+description: .augment(cap, wrapper) composes around whatever a capability resolves to, so you can observe, transform, or recover from it without replacing the implementation.
+---
+
+import Playground from '../../../playground/Playground.tsx';
+import augmentationLogging from '../../../examples/augmentation-logging.ts?raw';
+import augmentationStacking from '../../../examples/augmentation-stacking.ts?raw';
+import augmentationAsync from '../../../examples/augmentation-async.ts?raw';
+import augmentationCanary from '../../../examples/augmentation-canary.ts?raw';
+
+`.augment(cap, wrapper)` wraps whatever a capability resolves to: the layered
+value if a `.layer()` bound one, otherwise the base. Unlike `.layer()`, an
+augment does not replace anything: it composes *around* the resolved
+implementation, which still runs inside it unless the wrapper deliberately skips
+it. Reach for augmentation to log, time, transform a result, or recover from a
+failure without touching the implementation or its call sites.
+
+<Playground client:only="react" code={augmentationLogging} />
+
+## The wrapper, and the helpers
+
+A `wrapper` receives `next` (the callable it wraps) and returns a new callable
+with the same signature. Call `next(...args)` to run the wrapped
+implementation; do anything you like before, after, or instead.
+
+```ts
+const wrapper = (next) => (...args) => {
+  // before...
+  const result = next(...args);
+  // after...
+  return result;
+};
+```
+
+You rarely write that by hand. Four helpers cover the common shapes. Import
+them from `@mycl/core/helpers`:
+
+- **`before(fn)`** runs `fn(...args)` before each call; its return value is
+  ignored. Good for logging inputs, metrics, assertions.
+- **`after(fn)`** runs `fn(result, ...args)` after each call; the result is
+  passed through unchanged.
+- **`pipe(...transforms)`** chains transforms left-to-right over the return
+  value; each transform receives the previous one's output and returns the next.
+- **`handleError(handler, shouldHandle?, { rethrow }?)`** catches a throw (and
+  an async rejection); `handler(error, ...args)` returns the fallback value.
+  Optional `shouldHandle(error)` filters which errors are caught: the rest
+  re-throw. `{ rethrow: true }` runs the handler for side effects only and
+  re-throws the original error.
+
+## Stacking order
+
+Augments nest like an onion. The **first** augment added sits closest to the
+implementation (innermost); each later augment wraps the previous ones. So the
+**last** augment added is outermost: its logic runs first on the way in and
+last on the way out.
+
+<Playground client:only="react" code={augmentationStacking} />
+
+`outer` was added last, so it wraps `inner` and runs first. If a `.layer()`
+binding is present too, the augments wrap the layered value, not the base
+default.
+
+## Async: `after` and `pipe` see the Promise, not the value
+
+:::caution[after and pipe are synchronous]
+`after` and `pipe` operate on the **raw return value**. For an async capability
+that value is the **Promise itself**, not the settled result. If you transform
+an async result with `pipe`, you are transforming the Promise object, almost
+never what you want. To act on the settled value, `await` it yourself inside a
+wrapper (or chain `.then`). `handleError` is the exception: it detects a
+returned Promise and catches its rejection.
+:::
+
+<Playground client:only="react" code={augmentationAsync} />
+
+## Canary rollout with automatic fallback
+
+Augmentation is the tool for a cautious rollout. Layer a new implementation and
+augment it with `handleError` to fall back to the stable one on failure. If the
+new code misbehaves, the old path runs automatically: no redeploy to roll back.
+The fallback lives in the registry, not the implementation: drop the `.layer()`
+binding and the safety net is gone.
+
+<Playground client:only="react" code={augmentationCanary} />
+
+`pay(50)` runs the canary. `pay(200)` throws inside the canary; `handleError`
+catches it (it is an `Error`, so `shouldHandle` passes) and returns
+`stable(200)`. The fallback calls `stable` directly rather than re-dispatching
+`charge`, which would loop straight back into the canary.
+
+## Where next
+
+- [Layer strategies](/guide/layer-strategies/): the other way multiple bindings combine, folding a value rather than wrapping a call.
+- [Registries and layers](/guide/registries-and-layers/): where `.augment()` lives alongside `.layer()`.
+- [Snapshots and async](/guide/snapshots-and-async/): the scope model behind the async caveat above.

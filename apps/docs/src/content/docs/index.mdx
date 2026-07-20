@@ -1,0 +1,57 @@
+---
+title: Add dynamically scoped behaviors to your functions
+description: Wrap a function with capable() and it becomes an extension point you can replace, augment or observe from outside, scoped to wherever you bind it.
+template: splash
+hero:
+  tagline: Replace, wrap or transform your TypeScript functions from outside their call site.
+  image:
+    file: ../../assets/logo.svg
+  actions:
+    - text: Get started
+      link: /getting-started/quick-start/
+      icon: right-arrow
+      variant: primary
+    - text: View on GitHub
+      link: https://github.com/jgullstr/mycl
+      icon: external
+      variant: minimal
+---
+
+import Playground from '../../playground/Playground.tsx';
+import { Card, CardGrid } from '@astrojs/starlight/components';
+import heroExample from '../../examples/hero.ts?raw';
+import size from '../../generated/size.json';
+
+<div class="front-demo">
+  <Playground client:only="react" height={560} stretch code={heroExample} />
+</div>
+
+<div class="front-copy">
+
+<CardGrid>
+  <Card title="Call site never changes" icon="code-branch">
+    Bind a replacement in a registry and activate it for a scope. The binding
+    runs inside that scope. Callers stay untouched.
+  </Card>
+  <Card title="One identity, three jobs" icon="puzzle">
+    A capability is its own registry key, type contract, and default implementation.
+    No tokens, no string lookups, no container.
+  </Card>
+  <Card title="Misuse doesn't compile" icon="approve-check-circle">
+    A binding with the wrong signature is a compile error, and `requires()` makes
+    a missing binding one too.
+  </Card>
+  <Card title="Nothing extra" icon="cloud-download">
+    Zero dependencies, ESM only, side-effect free. v{size.version} bundles to
+    {size.kb}&nbsp;KB min+gzip.
+  </Card>
+</CardGrid>
+
+</div>
+
+<div class="front-outro">
+
+New here? Read the [Introduction](/getting-started/introduction/) for what mycl is and when to
+reach for it, or jump straight to the [Quick Start](/getting-started/quick-start/).
+
+</div>

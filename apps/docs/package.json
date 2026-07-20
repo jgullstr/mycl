@@ -1,0 +1,33 @@
+{
+  "name": "@mycl/docs",
+  "version": "0.1.0",
+  "type": "module",
+  "private": true,
+  "scripts": {
+    "prebuild": "node scripts/build-playground-bundle.mjs && node scripts/generate-error-pages.mjs && node scripts/generate-recipe-pages.mjs && node scripts/generate-changelog-page.mjs && node scripts/generate-size.mjs && node scripts/generate-llms-txt.mjs",
+    "predev": "node scripts/build-playground-bundle.mjs && node scripts/generate-error-pages.mjs && node scripts/generate-recipe-pages.mjs && node scripts/generate-changelog-page.mjs && node scripts/generate-size.mjs && node scripts/generate-llms-txt.mjs",
+    "dev": "astro dev",
+    "build": "astro build",
+    "preview": "astro preview",
+    "astro": "astro",
+    "test": "eslint --no-ignore \"src/examples/**/*.ts\" \"src/recipes/**/*.ts\" && tsc -p tsconfig.examples.json && node scripts/run-doc-examples.mjs && cd src/recipes-ui && node --test",
+    "test:examples": "node scripts/run-doc-examples.mjs",
+    "test:unit": "cd src/recipes-ui && node --test"
+  },
+  "dependencies": {
+    "@astrojs/react": "^5.0.0",
+    "@astrojs/starlight": "^0.40.0",
+    "@monaco-editor/react": "^4.6.0",
+    "astro": "^6.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "sharp": "^0.33.0",
+    "sucrase": "^3.35.0"
+  },
+  "devDependencies": {
+    "@mycl/core": "workspace:*",
+    "dts-bundle-generator": "^9.5.1",
+    "esbuild": "^0.24.0",
+    "typescript": "^5.4.0"
+  }
+}
