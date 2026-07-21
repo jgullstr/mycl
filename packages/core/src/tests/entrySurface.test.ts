@@ -1,6 +1,6 @@
 import { describe, expect, expectTypeOf, it } from 'vitest';
 import * as entry from '../index';
-import type { FnKernel, Mycl, RequiredIds, Requiring, Scope } from '../index';
+import type { Capable, FnKernel, Mycl, RequiredIds, Requiring, Scope } from '../index';
 import type { CapabilityId } from '../index';
 
 // The main entry is the one-package user story: the bound channel factory and
@@ -46,6 +46,9 @@ describe('main entry surface', () => {
   it('the user type vocabulary stands on the entry', () => {
     type K = FnKernel<'app'>;
     expectTypeOf<K['channel']['name']>().toEqualTypeOf<'app'>();
+    // Capable names the kernel's capable member: a consumer re-exporting
+    // kernel members needs it to carry the type in its own declarations.
+    expectTypeOf<K['capable']>().toEqualTypeOf<Capable<'app'>>();
     expectTypeOf<Scope>().toBeFunction();
     expectTypeOf<Mycl>().toBeFunction();
     type R = Requiring<() => void, 'app/x'>;

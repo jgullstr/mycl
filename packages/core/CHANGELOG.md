@@ -1,5 +1,9 @@
 # Changelog
 
+## 0.1.1 (2026-07-21)
+
+fix: export the Capable type from the main entry
+
 ## 0.1.0 (2026-07-20)
 
 Initial release: the capability/registry core. `createFnChannel` mints a

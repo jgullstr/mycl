@@ -25,8 +25,7 @@ export { default as isResolvedRegistry } from './registry/isResolvedRegistry';
 
 export type { FnKernel, Requiring, RequiredIds, MyclFactory, SuppliedRegistries, Mycl, Scope } from './kernel/types';
 
-export type { ChannelName } from './channel/types';
-export type { Channel } from './channel/types';
+export type { ChannelName, Channel, Capable } from './channel/types';
 export type { ScopeContext } from './context';
 export type { LayerStrategy } from './strategy/types';
 export type { AnyFn, AugmentWrapper, Transform } from './util/types';

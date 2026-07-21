@@ -1,6 +1,6 @@
 {
   "name": "@mycl/core",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Zero-dependency capability/registry system: mint a channel, define capabilities, layer registries, and resolve them through mycl() factories and scopes, in under 2 KB",
   "keywords": [
     "capability",
