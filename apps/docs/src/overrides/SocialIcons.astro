@@ -12,10 +12,28 @@
 // shown when the sidebar is OPEN lives in the Sidebar override's header row. Both carry
 // data-sidebar-toggle and share the one delegated handler defined below (rendered on
 // every page). Desktop only (>=50rem), matching where the collapse applies.
+// The star count beside the built-in GitHub icon is a shields.io badge, so the
+// number is live in the visitor's browser rather than frozen at build time.
+// `style=social` is the only shields style that does not paint its value block
+// in the default blue, which would fight the burgundy accent.
 import Default from '@astrojs/starlight/components/SocialIcons.astro';
 ---
 
 <Default><slot /></Default>
+
+<a
+  class="mycl-stars"
+  href="https://github.com/jgullstr/mycl/stargazers"
+  rel="me noopener"
+  aria-label="Star mycl on GitHub"
+>
+  <img
+    src="https://img.shields.io/github/stars/jgullstr/mycl?style=social"
+    alt="GitHub stars"
+    height="20"
+    decoding="async"
+  />
+</a>
 
 <div class="sidebar-rail">
   <button
@@ -66,6 +84,23 @@ import Default from '@astrojs/starlight/components/SocialIcons.astro';
 
 <style>
   @layer starlight.core {
+    /* Star badge: sits in the social-icon row. Hidden on narrow screens, where
+       the header row has no space to spare. The image carries its own size, so
+       only alignment is set here. */
+    .mycl-stars {
+      display: none;
+      align-items: center;
+      line-height: 0;
+    }
+    .mycl-stars img {
+      display: block;
+      height: 20px;
+      width: auto;
+    }
+    @media (min-width: 50rem) {
+      .mycl-stars { display: inline-flex; }
+    }
+
     /* Hidden by default and on mobile (the collapse is a desktop feature). On desktop
        the rail is a narrow fixed strip shown ONLY when the sidebar is collapsed. It is
        exactly --mycl-rail wide, on the sidebar surface with a right hairline, so it

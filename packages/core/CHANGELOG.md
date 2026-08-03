@@ -1,5 +1,16 @@
 # Changelog
 
+## 0.1.2 (2026-08-03)
+
+The first release published from CI through npm trusted publishing, so this
+tarball carries a provenance attestation linking it to the workflow run and
+commit that built it. No runtime change: the package's behavior, exports and
+size are untouched.
+
+Test coverage is now gated at 100% of statements, branches, functions and lines.
+Closing the last gap added a test for `merge()`'s rejection of an
+already-resolved registry.
+
 ## 0.1.1 (2026-07-21)
 
 fix: export the Capable type from the main entry

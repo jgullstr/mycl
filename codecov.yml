@@ -1,0 +1,18 @@
+# Coverage is gated in CI by the 100% thresholds in packages/core/vitest.config.ts.
+# Codecov exists here for the badge and the diff view, so its own statuses stay
+# informational: two gates disagreeing about the same number is worse than one.
+coverage:
+  status:
+    project:
+      default:
+        informational: true
+    patch:
+      default:
+        informational: true
+
+comment: false
+
+# The docs app is lint, typecheck and executed examples rather than unit tests;
+# instrumenting it would measure nothing anyone would act on.
+ignore:
+  - 'apps/docs'

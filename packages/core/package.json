@@ -1,6 +1,6 @@
 {
   "name": "@mycl/core",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Zero-dependency capability/registry system: mint a channel, define capabilities, layer registries, and resolve them through mycl() factories and scopes, in under 2 KB",
   "keywords": [
     "capability",
@@ -59,11 +59,13 @@
   "scripts": {
     "build": "tsup",
     "test": "vitest run",
+    "test:coverage": "vitest run --coverage",
     "typecheck": "tsc --noEmit",
     "prepublishOnly": "node ../../scripts/check-changelog.mjs"
   },
   "devDependencies": {
     "@types/node": "^25.6.0",
+    "@vitest/coverage-v8": "^3.2.7",
     "tsup": "^8.0.0",
     "vitest": "^3.0.0"
   }

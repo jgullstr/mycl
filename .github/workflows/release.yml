@@ -1,0 +1,65 @@
+name: Release
+
+# Publishing runs here rather than from a laptop so npm can attest provenance:
+# the OIDC token GitHub mints below carries the repository, workflow path and
+# ref, and npm checks those claims against the trusted publisher registered for
+# the package. A local `pnpm publish` still works as a break-glass path, but it
+# produces an unattested tarball.
+on:
+  push:
+    tags: ['v*']
+
+jobs:
+  publish:
+    name: publish @mycl/core
+    # This file also exists on the private remote. Without the guard, a tag
+    # pushed there fires a publish whose OIDC claims can never match.
+    if: github.repository == 'jgullstr/mycl'
+    runs-on: ubuntu-latest
+    # Trusted publishing is scoped to repository + workflow path, so anyone who
+    # can push this file could otherwise publish. The protected environment is
+    # what closes that.
+    environment: release
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # check-tag-version needs main to test reachability against.
+          fetch-depth: 0
+
+      # Reads the pnpm version from the root package.json packageManager field.
+      # Keep that pin on pnpm 10: OIDC publishing 404s on pnpm 11
+      # (pnpm/pnpm#11513), and this workflow has no token to fall back to.
+      - uses: pnpm/action-setup@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          registry-url: https://registry.npmjs.org
+
+      - run: pnpm install --frozen-lockfile
+
+      # First, and before the build: a tag/version mismatch or a tag off main is
+      # fatal and cheap to detect, and both are permanent once published.
+      - run: node scripts/check-tag-version.mjs packages/core
+
+      # The same gate main passes. The tagged commit is re-verified here rather
+      # than trusted to have been green when it was merged.
+      - run: pnpm build
+      - run: pnpm test
+      - run: pnpm typecheck
+      - run: pnpm lint
+      - run: pnpm size
+      - run: pnpm check-dce
+      - run: pnpm check-changelog
+      - run: pnpm coverage
+      - run: pnpm smoke
+
+      # No NPM_TOKEN: `id-token: write` above is the whole authentication story.
+      # npm attaches provenance automatically under trusted publishing; the flag
+      # is explicit because pnpm, not npm, performs the OIDC exchange.
+      - run: pnpm publish -r --no-git-checks --access public --provenance

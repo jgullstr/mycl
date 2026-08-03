@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { merge } from '../merge';
 import { makeResolvedRegistry, getResolvedSym } from '../resolvedRegistry';
 import { registry } from '../registry';
+import { errMsg, ERR_MERGE_RESOLVED } from '../../util/errors';
 import { createChannel } from '../../channel/createChannel';
 import { connectorOf } from '../../tests/connectorOf';
 
@@ -62,6 +63,20 @@ describe('layer', () => {
 
     const resolved = merge(reg);
     expect(resolved.resolve(cap)?.()).toEqual({ greeting: 'hello', subject: 'world' });
+  });
+});
+
+describe('already-resolved input', () => {
+  it('rejects a ResolvedRegistry, which has no bindings left to fold', () => {
+    const resolved = merge(registry());
+    expect(() => merge(resolved as unknown as ReturnType<typeof registry>))
+      .toThrow(new TypeError(errMsg(ERR_MERGE_RESOLVED)));
+  });
+
+  it('rejects it in any position, not just first', () => {
+    const resolved = merge(registry());
+    expect(() => merge(registry(), resolved as unknown as ReturnType<typeof registry>))
+      .toThrow(TypeError);
   });
 });
 

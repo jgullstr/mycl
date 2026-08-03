@@ -4,8 +4,8 @@
   "type": "module",
   "private": true,
   "scripts": {
-    "prebuild": "node scripts/build-playground-bundle.mjs && node scripts/generate-error-pages.mjs && node scripts/generate-recipe-pages.mjs && node scripts/generate-changelog-page.mjs && node scripts/generate-size.mjs && node scripts/generate-llms-txt.mjs",
-    "predev": "node scripts/build-playground-bundle.mjs && node scripts/generate-error-pages.mjs && node scripts/generate-recipe-pages.mjs && node scripts/generate-changelog-page.mjs && node scripts/generate-size.mjs && node scripts/generate-llms-txt.mjs",
+    "prebuild": "node scripts/build-playground-bundle.mjs && node scripts/generate-error-pages.mjs && node scripts/generate-recipe-pages.mjs && node scripts/generate-changelog-page.mjs && node scripts/generate-size.mjs && node scripts/generate-coverage.mjs && node scripts/generate-llms-txt.mjs",
+    "predev": "node scripts/build-playground-bundle.mjs && node scripts/generate-error-pages.mjs && node scripts/generate-recipe-pages.mjs && node scripts/generate-changelog-page.mjs && node scripts/generate-size.mjs && node scripts/generate-coverage.mjs && node scripts/generate-llms-txt.mjs",
     "dev": "astro dev",
     "build": "astro build",
     "preview": "astro preview",

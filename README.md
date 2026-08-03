@@ -1,5 +1,9 @@
 # mycl
 
+[![CI](https://github.com/jgullstr/mycl/actions/workflows/ci.yml/badge.svg)](https://github.com/jgullstr/mycl/actions/workflows/ci.yml)
+[![codecov](https://codecov.io/gh/jgullstr/mycl/branch/main/graph/badge.svg)](https://codecov.io/gh/jgullstr/mycl)
+[![npm](https://img.shields.io/npm/v/@mycl/core.svg)](https://www.npmjs.com/package/@mycl/core)
+
 Connect your code.
 
 mycl is a capability/registry system for TypeScript: modify a function's behavior

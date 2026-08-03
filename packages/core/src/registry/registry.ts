@@ -11,6 +11,9 @@ import { errMsg, fmt, MESSAGES, ERR_LAYER_TARGET, ERR_LAYER_UNDEFINED, ERR_AUGME
 import isCapability from '../capability/isCapability';
 import { isValidLayer } from '../strategy/fold';
 
+// The probe below is handed to the wrapper, never called by it: a wrapper composes
+// around `next`, it does not invoke it at build time. Uncoverable by construction.
+/* v8 ignore next */
 const canaryNoop: AnyFn = () => undefined;
 
 /**

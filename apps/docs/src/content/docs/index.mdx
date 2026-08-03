@@ -21,6 +21,7 @@ import Playground from '../../playground/Playground.tsx';
 import { Card, CardGrid } from '@astrojs/starlight/components';
 import heroExample from '../../examples/hero.ts?raw';
 import size from '../../generated/size.json';
+import coverage from '../../generated/coverage.json';
 
 <div class="front-demo">
   <Playground client:only="react" height={560} stretch code={heroExample} />
@@ -41,9 +42,9 @@ import size from '../../generated/size.json';
     A binding with the wrong signature is a compile error, and `requires()` makes
     a missing binding one too.
   </Card>
-  <Card title="Nothing extra" icon="cloud-download">
+  <Card title="Principled" icon="cloud-download">
     Zero dependencies, ESM only, side-effect free. v{size.version} bundles to
-    {size.kb}&nbsp;KB min+gzip.
+    {size.kb}&nbsp;KB min+gzip at {coverage.pct}% test coverage.
   </Card>
 </CardGrid>
 

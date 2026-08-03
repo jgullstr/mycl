@@ -59,10 +59,22 @@ starlight-menu-button button {
   top: calc(var(--mycl-banner-height) + (var(--mycl-nav-row-height) - var(--sl-menu-button-size)) / 2);
 }
 
+/* The playground island sizes itself with `height: 100%` in stretch mode, which
+   resolves only against a parent of definite height. Above 72rem that parent is
+   the stretched grid item defined below. Below it, .front-demo is a plain block,
+   the percentage has nothing to resolve against, and Monaco's container measures
+   zero: an empty frame with a working console under it. A definite height here
+   fixes every width below the split; the grid rules below override it above. */
+.front-demo {
+  height: 37.5rem;
+}
+
 /* Front page split view: full-width hero on top, then playground left and
    card blocks right. Scoped via the .front-demo marker so no other page is
    affected; below the breakpoint the page stacks exactly as before. */
 @media (min-width: 72rem) {
+  main:has(.front-demo) .front-demo { height: auto; }
+
   main:has(.front-demo) .sl-container {
     display: grid;
     grid-template-columns: minmax(0, 3fr) minmax(0, 2fr);

@@ -18,7 +18,11 @@ export default defineConfig({
       },
       favicon: '/favicon.svg',
       tagline: 'connect your code',
-      social: [{ icon: 'github', label: 'GitHub', href: 'https://github.com/jgullstr/mycl' }],
+      // No GitHub entry: the star badge in the SocialIcons override carries
+      // GitHub's own logo and links to the same repo, so the built-in icon was
+      // a second GitHub link sitting next to the first. Any social entry added
+      // here still renders, ahead of the badge.
+      social: [],
       customCss: ['./src/styles/custom.css'],
       // Overrides for the site-wide docs-sidebar collapse:
       //  - Sidebar: prepends the collapse toggle (top-right of the sidebar).
