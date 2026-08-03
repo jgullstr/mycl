@@ -1,10 +1,9 @@
 name: Release
 
-# Publishing runs here rather than from a laptop so npm can attest provenance:
+# Publishing runs on GitHub so npm can attest provenance:
 # the OIDC token GitHub mints below carries the repository, workflow path and
 # ref, and npm checks those claims against the trusted publisher registered for
-# the package. A local `pnpm publish` still works as a break-glass path, but it
-# produces an unattested tarball.
+# the package.
 on:
   push:
     tags: ['v*']
@@ -12,13 +11,13 @@ on:
 jobs:
   publish:
     name: publish @mycl/core
-    # This file also exists on the private remote. Without the guard, a tag
-    # pushed there fires a publish whose OIDC claims can never match.
+    # Restricts publishing to the public repository, the one npm's trusted
+    # publisher names in its claims.
     if: github.repository == 'jgullstr/mycl'
     runs-on: ubuntu-latest
-    # Trusted publishing is scoped to repository + workflow path, so anyone who
-    # can push this file could otherwise publish. The protected environment is
-    # what closes that.
+    # Gates the publish behind the protected `release` environment, narrowing
+    # trusted publishing from "anyone who can push this workflow file" to an
+    # approved deployment.
     environment: release
     permissions:
       id-token: write
@@ -27,40 +26,35 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # check-tag-version needs main to test reachability against.
+          # Full history, so check-tag-version can test the tag's reachability
+          # from main.
           fetch-depth: 0
 
       # Reads the pnpm version from the root package.json packageManager field.
       - uses: pnpm/action-setup@v4
 
-      # Node 22 to match the CI job that gates main, so the release is verified
-      # on the runtime the test suite actually runs on.
-      #
-      # Deliberately no `registry-url`: it makes setup-node write an .npmrc
-      # holding `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`, and with
-      # no NODE_AUTH_TOKEN (there is none by design here) that resolves to an
-      # EMPTY token, which publishes unauthenticated.
+      # Node 22 matches the CI job that gates main, so the release runs the
+      # suite on the runtime it was verified against. The registry stays at its
+      # default: credentials come from the OIDC exchange below.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
 
-      # Node 22 bundles npm 10.9.x, which predates trusted publishing entirely
-      # and so never attempts the OIDC exchange: it publishes unauthenticated
-      # (a masked 404 with an empty token configured, ENEEDAUTH without one).
-      # npm gained OIDC in 11.5.1. Upgrading npm rather than moving the job to
-      # Node 24 keeps the release on the same runtime CI gates main with.
+      # npm performs the OIDC exchange from 11.5.1 onward; Node 22 bundles
+      # 10.9.x. Installing npm 11 supplies the version that can authenticate,
+      # and `npm --version` records which one ran in the release log.
       - run: npm install -g npm@11
       - run: npm --version
 
       - run: pnpm install --frozen-lockfile
 
-      # First, and before the build: a tag/version mismatch or a tag off main is
-      # fatal and cheap to detect, and both are permanent once published.
+      # Confirms the tag names the version being published and sits on main.
+      # Runs before the build so both fail in seconds, and both are permanent
+      # once a version reaches the registry.
       - run: node scripts/check-tag-version.mjs packages/core
 
-      # The same gate main passes. The tagged commit is re-verified here rather
-      # than trusted to have been green when it was merged.
+      # Re-runs the gate main passes, against the tagged commit itself.
       - run: pnpm build
       - run: pnpm test
       - run: pnpm typecheck
@@ -71,14 +65,11 @@ jobs:
       - run: pnpm coverage
       - run: pnpm smoke
 
-      # npm directly rather than `pnpm publish`, which only shells out to npm for
-      # the upload anyway: trusted publishing is npm's feature, and the extra
-      # layer bought nothing here (@mycl/core has no dependencies, so there are
-      # no workspace: ranges for pnpm to rewrite) while making two failures
-      # harder to read.
-      #
-      # No NPM_TOKEN: `id-token: write` above is the whole authentication story.
-      # Provenance is automatic under trusted publishing; the flag is explicit
-      # so a misconfiguration fails loudly instead of publishing unattested.
+      # Publishes through npm, which owns trusted publishing: it exchanges the
+      # `id-token: write` identity above for a registry credential and attaches
+      # the provenance attestation. `--provenance` states that requirement
+      # explicitly, so a run that cannot attest fails instead of shipping
+      # unattested. @mycl/core has no dependencies, so the manifest publishes
+      # as it sits on disk.
       - run: npm publish --provenance --access public
         working-directory: packages/core
