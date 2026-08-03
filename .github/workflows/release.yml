@@ -33,17 +33,25 @@ jobs:
       # Reads the pnpm version from the root package.json packageManager field.
       - uses: pnpm/action-setup@v4
 
-      # Deliberately no `registry-url`. It makes setup-node write an .npmrc
+      # Node 22 to match the CI job that gates main, so the release is verified
+      # on the runtime the test suite actually runs on.
+      #
+      # Deliberately no `registry-url`: it makes setup-node write an .npmrc
       # holding `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`, and with
       # no NODE_AUTH_TOKEN (there is none by design here) that resolves to an
-      # EMPTY token. Before pnpm 11.3 a configured static _authToken wins over
-      # trusted publishing, so pnpm would publish unauthenticated and npm
-      # answers the PUT with a masked 404. Without the .npmrc, pnpm performs the
-      # OIDC exchange. This bit us on the first 0.1.2 attempt.
+      # EMPTY token, which publishes unauthenticated.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
+
+      # Node 22 bundles npm 10.9.x, which predates trusted publishing entirely
+      # and so never attempts the OIDC exchange: it publishes unauthenticated
+      # (a masked 404 with an empty token configured, ENEEDAUTH without one).
+      # npm gained OIDC in 11.5.1. Upgrading npm rather than moving the job to
+      # Node 24 keeps the release on the same runtime CI gates main with.
+      - run: npm install -g npm@11
+      - run: npm --version
 
       - run: pnpm install --frozen-lockfile
 
@@ -63,7 +71,14 @@ jobs:
       - run: pnpm coverage
       - run: pnpm smoke
 
+      # npm directly rather than `pnpm publish`, which only shells out to npm for
+      # the upload anyway: trusted publishing is npm's feature, and the extra
+      # layer bought nothing here (@mycl/core has no dependencies, so there are
+      # no workspace: ranges for pnpm to rewrite) while making two failures
+      # harder to read.
+      #
       # No NPM_TOKEN: `id-token: write` above is the whole authentication story.
-      # npm attaches provenance automatically under trusted publishing; the flag
-      # is explicit because pnpm, not npm, performs the OIDC exchange.
-      - run: pnpm publish -r --no-git-checks --access public --provenance
+      # Provenance is automatic under trusted publishing; the flag is explicit
+      # so a misconfiguration fails loudly instead of publishing unattested.
+      - run: npm publish --provenance --access public
+        working-directory: packages/core
