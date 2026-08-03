@@ -31,15 +31,19 @@ jobs:
           fetch-depth: 0
 
       # Reads the pnpm version from the root package.json packageManager field.
-      # Keep that pin on pnpm 10: OIDC publishing 404s on pnpm 11
-      # (pnpm/pnpm#11513), and this workflow has no token to fall back to.
       - uses: pnpm/action-setup@v4
 
+      # Deliberately no `registry-url`. It makes setup-node write an .npmrc
+      # holding `//registry.npmjs.org/:_authToken=${NODE_AUTH_TOKEN}`, and with
+      # no NODE_AUTH_TOKEN (there is none by design here) that resolves to an
+      # EMPTY token. Before pnpm 11.3 a configured static _authToken wins over
+      # trusted publishing, so pnpm would publish unauthenticated and npm
+      # answers the PUT with a masked 404. Without the .npmrc, pnpm performs the
+      # OIDC exchange. This bit us on the first 0.1.2 attempt.
       - uses: actions/setup-node@v4
         with:
           node-version: 22
           cache: pnpm
-          registry-url: https://registry.npmjs.org
 
       - run: pnpm install --frozen-lockfile
 
