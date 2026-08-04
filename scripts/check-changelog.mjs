@@ -2,10 +2,16 @@
 // section for the version in package.json. Runs as a package's prepublishOnly
 // (cwd = the package dir) and from the repo root in CI with the package dir
 // as the argument.
+//
+// `--print` writes that section's body to stdout and nothing else, so the
+// release workflow can pipe it into the GitHub Release notes. The gate keeps
+// owning the parse: the notes are then the same text the publish verified.
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
 
-const dir = path.resolve(process.argv[2] ?? '.');
+const args = process.argv.slice(2);
+const print = args.includes('--print');
+const dir = path.resolve(args.find((arg) => !arg.startsWith('--')) ?? '.');
 const { name, version } = JSON.parse(readFileSync(path.join(dir, 'package.json'), 'utf8'));
 const changelog = readFileSync(path.join(dir, 'CHANGELOG.md'), 'utf8');
 
@@ -21,4 +27,5 @@ if (body === '') {
   console.error(`${name}: the CHANGELOG.md "## ${version}" section is empty. Write the entry before publishing.`);
   process.exit(1);
 }
-console.log(`${name}: CHANGELOG.md covers ${version} ("${lines[start].trim()}")`);
+if (print) process.stdout.write(`${body}\n`);
+else console.log(`${name}: CHANGELOG.md covers ${version} ("${lines[start].trim()}")`);

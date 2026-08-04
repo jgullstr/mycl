@@ -73,3 +73,27 @@ jobs:
       # as it sits on disk.
       - run: npm publish --provenance --access public
         working-directory: packages/core
+
+  # The Releases page is where watchers, the releases.atom feed and dependency
+  # bots look; a bare tag reaches none of them. Notes are written only after the
+  # tarball reaches the registry, so the page never advertises a version npm
+  # does not have, and in a job of their own so `contents: write` never sits
+  # beside the publishing identity above.
+  notes:
+    name: write the GitHub release
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      # No install and no setup-node: the gate script is dependency-free and
+      # reads two files, so the runner's own Node runs it.
+      - run: node scripts/check-changelog.mjs packages/core --print > notes.md
+
+      # --verify-tag refuses to invent a tag if the ref ever went missing.
+      - run: gh release create "$GITHUB_REF_NAME" --verify-tag --title "$GITHUB_REF_NAME" --notes-file notes.md
+        env:
+          GH_TOKEN: ${{ github.token }}
